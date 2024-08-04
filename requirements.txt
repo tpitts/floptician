@@ -1,0 +1,24 @@
+# Install the GPU version of PyTorch if you have an NVIDIA GPU:
+# For CUDA 11.8:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Basic utilities
+numpy
+opencv-python
+Pillow
+pyyaml
+
+# Logging
+logging
+
+# HTTP and WebSocket servers
+websocket-server
+obsws-python
+
+# YOLO model from ultralytics
+ultralytics
+
+# Windows-specific dependencies
+# Run these commands manually on Windows
+# pip install msvcrt
+# pip install pygrabber

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Echelon Overlay</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --card-width: 7.5rem;
+            --card-height: 10.5rem;
+        }
+        html {
+            font-size: 16px;
+        }
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #board {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.625rem;
+            position: absolute;
+            top: 1.25rem;
+            left: 1.25rem;
+        }
+        .card {
+            width: var(--card-width);
+            height: var(--card-height);
+            border-radius: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 8rem;
+            background-color: white;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.2), 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+            color: #333;
+            font-weight: 700;
+            position: relative;
+            overflow: hidden;
+            border: 0.0625rem solid #e0e0e0;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%);
+            z-index: 1;
+        }
+        .card .rank {
+            position: absolute;
+            top: 0.5rem;
+            left: 0.5rem;
+            font-size: 3.5rem;
+        }
+        .card .suit {
+            font-size: 6rem;
+            line-height: 1;
+        }
+        .text-red { color: #d32f2f; }
+        .text-black { color: #212121; }
+        #debug-info {
+            position: absolute;
+            bottom: 1.25rem;
+            left: 1.25rem;
+            font-size: 0.875rem;
+            color: #ffffff;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 0.625rem;
+            border-radius: 0.3125rem;
+            backdrop-filter: blur(0.3125rem);
+            max-width: 18.75rem;
+        }
+        #connection-status {
+            position: fixed;
+            top: 0.625rem;
+            right: 0.625rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 1.25rem;
+            font-size: 0.875rem;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #ffffff;
+        }
+    </style>
+</head>
+<body>
+    <div id="board"></div>
+    <div id="debug-info"></div>
+    <div id="connection-status"></div>
+
+    <script>
+        const wsUrl = `ws://${window.location.hostname}:9001`;
+        let socket;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        let debugMode = false;
+
+        const suits = {
+            h: { symbol: "♥", color: "text-red" },
+            d: { symbol: "♦", color: "text-red" },
+            c: { symbol: "♣", color: "text-black" },
+            s: { symbol: "♠", color: "text-black" }
+        };
+
+        function connect() {
+            console.log(`Attempting to connect to WebSocket server at ${wsUrl}`);
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function(e) {
+                console.log("Connected to WebSocket server");
+                updateConnectionStatus('Connected');
+                reconnectAttempts = 0;
+            };
+
+            socket.onmessage = function(event) {
+                console.log("Received message:", event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    updateOverlay(data);
+                } catch (error) {
+                    console.error("Error parsing message:", error);
+                }
+            };
+
+            socket.onclose = function(event) {
+                console.log('Connection closed');
+                updateConnectionStatus('Disconnected');
+                
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    const timeout = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    console.log(`Attempting to reconnect in ${timeout/1000} seconds...`);
+                    setTimeout(connect, timeout);
+                    reconnectAttempts++;
+                } else {
+                    console.error("Max reconnection attempts reached. Please refresh the page.");
+                }
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket Error:', error);
+                updateConnectionStatus('Error');
+            };
+        }
+
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('connection-status');
+            if (debugMode) {
+                statusElement.textContent = status;
+                statusElement.style.display = 'block';
+            } else {
+                statusElement.style.display = 'none';
+            }
+        }
+
+        function getCardDetails(card) {
+            const suit = card.slice(-1).toLowerCase();
+            let rank = card.slice(0, -1).toUpperCase();
+            if (rank === "T") rank = "10";
+            return { ...suits[suit], rank };
+        }
+
+        function updateOverlay(data) {
+            const boardElement = document.getElementById('board');
+            const debugInfoElement = document.getElementById('debug-info');
+
+            boardElement.innerHTML = '';
+            debugInfoElement.innerHTML = '';
+
+            debugMode = !!data.debug_info;
+
+            if (data.state === 'stable' && data.board && data.board.length > 0) {
+                data.board.forEach(cardInfo => {
+                    const cardElement = document.createElement('div');
+                    cardElement.className = 'card';
+                    const { symbol, color, rank } = getCardDetails(cardInfo.card);
+                    cardElement.innerHTML = `
+                        <span class="rank ${color}">${rank}</span>
+                        <span class="suit ${color}">${symbol}</span>
+                    `;
+                    cardElement.style.order = cardInfo.x;
+                    boardElement.appendChild(cardElement);
+                });
+            }
+
+            if (debugMode) {
+                let debugHtml = `
+                    <p>State: ${data.state}</p>
+                    <p>Frame Count: ${data.frame_count}</p>
+                    <p>Processing Time: ${data.debug_info.processing_time.toFixed(4)}s</p>
+                    <p>Frame ID: ${data.debug_info.frame_id}</p>
+                    <p>Detections:</p>
+                    <ul>
+                `;
+                data.debug_info.detections.forEach(d => {
+                    debugHtml += `<li>${d.card} (${d.confidence.toFixed(2)})</li>`;
+                });
+                debugHtml += '</ul>';
+                debugInfoElement.innerHTML = debugHtml;
+                debugInfoElement.style.display = 'block';
+                updateConnectionStatus(socket.readyState === WebSocket.OPEN ? 'Connected' : 'Disconnected');
+            } else {
+                debugInfoElement.style.display = 'none';
+                document.getElementById('connection-status').style.display = 'none';
+            }
+        }
+
+        window.onload = connect;
+
+        window.addEventListener('error', function(event) {
+            console.error('Uncaught error:', event.error);
+        });
+    </script>
+</body>
+</html>
