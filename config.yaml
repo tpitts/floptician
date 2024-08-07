@@ -1,3 +1,4 @@
+debug: false
 host: 'localhost'
 http_port: 8000
 websocket_port: 9001
@@ -17,5 +18,12 @@ capture:
 
 yolo:
   model: 'models/best.pt'
+  confidence_threshold: 0.70
+  overlap_threshold: 0.80
 
-debug: false
+board_processor:
+  vertical_alignment_threshold: 0.25
+  min_frames_to_show: 2
+  min_ms_to_show: 4000
+  min_frames_to_remove: 5
+  min_ms_to_remove: 5000
