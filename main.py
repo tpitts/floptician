@@ -8,9 +8,11 @@ import cv2
 import yaml
 import logging
 import argparse
+import ultralytics
+from enum import Enum
 from app.custom_http_server import start_http_server
 from app.custom_websocket_server import WebSocketServer
-from app.board_processor import BoardProcessor
+from app.board_processor import BoardProcessor, BoardState
 from app.obs_client import OBSClient
 from app.camera_manager import CameraManager
 
@@ -28,7 +30,6 @@ config = load_config()
 
 # Prefer the environment variable, fall back to config.yaml
 obs_password = os.getenv('OBS_PASSWORD', config['obs']['password'])
-
 config['obs']['password'] = obs_password
 
 # Create output directory
@@ -39,34 +40,39 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 RUN_OUTPUT_DIR = os.path.join(OUTPUT_DIR, datetime.now().strftime("%Y%m%d_%H%M%S"))
 os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
 
-# Set up logging
-logger = logging.getLogger('echelon')
-logger.setLevel(logging.INFO)  # Default to INFO level
+# Set up logging configuration
+def configure_logging(debug_mode):
+    logging_level = logging.DEBUG if debug_mode else logging.INFO
 
-# Create console handler and set level to INFO
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
+    # Configure the root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging_level)
+    
+    # Remove any existing handlers
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+    
+    # Add stream handler
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging_level)
+    stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    root_logger.addHandler(stream_handler)
 
-# Create formatter
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-# Add formatter to ch
-ch.setFormatter(formatter)
-
-# Add ch to logger
-logger.addHandler(ch)
-
-# Prevent the logger from propagating to the root logger
-logger.propagate = False
+    # Suppress YOLO logging
+    logging.getLogger('ultralytics').setLevel(logging.ERROR)
+    logging.getLogger('obsws_python').setLevel(logging.ERROR)
+    logging.getLogger('comtypes').setLevel(logging.ERROR)
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description='Echelon card detection system')
+parser = argparse.ArgumentParser(description='Floptician card detection system')
 parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 args = parser.parse_args()
 
-if config['debug'] or args.debug:
-    logger.setLevel(logging.DEBUG)
-    ch.setLevel(logging.DEBUG)
+# Set up logging
+configure_logging(config.get('debug', False) or args.debug)
+
+# Define the logger
+logger = logging.getLogger()
 
 websocket_server = WebSocketServer(config['host'], config['websocket_port'])
 
@@ -99,7 +105,7 @@ def start_capture_loop():
         return
 
     try:
-        board_processor = BoardProcessor(config['yolo']['model'])
+        board_processor = BoardProcessor(config)
     except ValueError as e:
         logger.error(f"Error initializing BoardProcessor: {str(e)}")
         return
@@ -175,34 +181,40 @@ def start_capture_loop():
                 # Board processing
                 try:
                     result = board_processor.process_frame(frame)
+
+                    # Update logging
+                    if result['state'] == BoardState.SHOWING:
+                        logger.info(f"Stable board detected: {json.dumps(result['board'], indent=2)}")
+                    elif result['state'] == BoardState.NOT_SHOWING:
+                        logger.info("No board detected")
+                    else:
+                        logger.warning(f"Unexpected board state: {result['state']}")
+
+                    # Add frame_count to the result
+                    result['frame_count'] = frame_count
+
+                    # Convert BoardState enum to string for JSON serialization
+                    result['state'] = result['state'].value
+
+                    # Convert any other enum types in the result to strings
+                    result = json.loads(json.dumps(result, default=lambda o: o.value if isinstance(o, Enum) else str(o)))
+
+                    # WebSocket update (send for every frame)
+                    websocket_server.send_message(result)
+
+                    logger.debug(f"Frame {frame_count} processed: {json.dumps(result, indent=2)}")
+
+                    frame_count += 1
+                    loop_duration = time.time() - loop_start
+                    total_time += loop_duration
+
+                    # Performance logging
+                    if frame_count % 100 == 0:
+                        logger.info(f"Processed {frame_count} frames. Average processing time: {total_time/frame_count:.4f}s")
+
                 except Exception as e:
-                    logger.error(f"Error processing image: {e}")
+                    logger.error(f"Error processing board state: {e}")
                     continue
-
-                # Add frame_count to the result
-                result['frame_count'] = frame_count
-
-                # WebSocket update (send for every frame)
-                websocket_server.send_message(result)
-
-                # Logging
-                if result['state'] == 'stable':
-                    logger.info(f"Stable board detected: {json.dumps(result['board'], indent=2)}")
-                elif result['state'] == 'detected':
-                    logger.info("Unstable board detected")
-                else:
-                    logger.info("No board detected")
-
-                logger.debug(f"Frame {frame_count} processed: {json.dumps(result, indent=2)}")
-
-                frame_count += 1
-                loop_duration = time.time() - loop_start
-                total_time += loop_duration
-
-                # Performance logging
-                if frame_count % 100 == 0:
-                    logger.info(f"Processed {frame_count} frames. Average processing time: {total_time/frame_count:.4f}s")
-
             else:
                 logger.warning("Failed to capture frame")
 
