@@ -2,22 +2,24 @@ import json
 import threading
 import time
 import os
+import asyncio
 from datetime import datetime
+from dataclasses import dataclass
+from collections import deque
 import numpy as np
 import cv2
 import yaml
 import logging
 import argparse
-import ultralytics
+from aioconsole import ainput
 from enum import Enum
+from typing import Any, Dict
 from app.custom_http_server import start_http_server
 from app.custom_websocket_server import WebSocketServer
 from app.board_processor import BoardProcessor, BoardState
 from app.obs_client import OBSClient
 from app.camera_manager import CameraManager
-
-#windows specific, needs a fix
-import msvcrt
+from app.frame_processor import FrameProcessor  # Import the new FrameProcessor
 
 # Configuration
 CONFIG_FILE = 'config.yaml'
@@ -72,7 +74,7 @@ args = parser.parse_args()
 configure_logging(config.get('debug', False) or args.debug)
 
 # Define the logger
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 websocket_server = WebSocketServer(config['host'], config['websocket_port'])
 
@@ -134,8 +136,7 @@ def start_capture_loop():
             logger.error("No webcams found in OBS. Exiting...")
             return
 
-        selected_webcam = webcams[0] if len(webcams) == 1 else select_input(webcams, "webcam")
-        capture_frame = lambda: obs_client.capture_frame(selected_webcam)
+        config['capture']['selected_webcam'] = webcams[0] if len(webcams) == 1 else select_input(webcams, "webcam")
 
     elif config['capture']['mode'] == 'direct_webcam':
         camera_manager = CameraManager()
@@ -150,95 +151,23 @@ def start_capture_loop():
             return
 
         camera_manager.set_resolution(config['capture']['width'], config['capture']['height'])
-        capture_frame = camera_manager.get_frame
+        config['capture']['camera_manager'] = camera_manager
 
     else:
         logger.error(f"Invalid capture mode: {config['capture']['mode']}. Exiting...")
         return
 
-    logger.info("Press 'q' to quit.")
-    frame_count = 0
-    total_time = 0
-
-    while True:
-        try:
-            loop_start = time.time()
-
-            # Capture frame
-            if config['capture']['mode'] == 'obs_websocket':
-                image_data = capture_frame()
-                if image_data:
-                    nparr = np.frombuffer(image_data, np.uint8)
-                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                else:
-                    frame = None
-            else:
-                success, frame = capture_frame()
-                if not success:
-                    frame = None
-
-            if frame is not None:
-                # Board processing
-                try:
-                    result = board_processor.process_frame(frame)
-
-                    # Update logging
-                    if result['state'] == BoardState.SHOWING:
-                        logger.info(f"Stable board detected: {json.dumps(result['board'], indent=2)}")
-                    elif result['state'] == BoardState.NOT_SHOWING:
-                        logger.info("No board detected")
-                    else:
-                        logger.warning(f"Unexpected board state: {result['state']}")
-
-                    # Add frame_count to the result
-                    result['frame_count'] = frame_count
-
-                    # Convert BoardState enum to string for JSON serialization
-                    result['state'] = result['state'].value
-
-                    # Convert any other enum types in the result to strings
-                    result = json.loads(json.dumps(result, default=lambda o: o.value if isinstance(o, Enum) else str(o)))
-
-                    # WebSocket update (send for every frame)
-                    websocket_server.send_message(result)
-
-                    logger.debug(f"Frame {frame_count} processed: {json.dumps(result, indent=2)}")
-
-                    frame_count += 1
-                    loop_duration = time.time() - loop_start
-                    total_time += loop_duration
-
-                    # Performance logging
-                    if frame_count % 100 == 0:
-                        logger.info(f"Processed {frame_count} frames. Average processing time: {total_time/frame_count:.4f}s")
-
-                except Exception as e:
-                    logger.error(f"Error processing board state: {e}")
-                    continue
-            else:
-                logger.warning("Failed to capture frame")
-
-            if msvcrt.kbhit():
-                if msvcrt.getch().lower() == b'q':
-                    logger.info("Quitting...")
-                    break
-
-            # Calculate sleep time to maintain desired FPS
-            sleep_time = max(0, (1 / config['capture']['fps']) - loop_duration)
-            time.sleep(sleep_time)
-        
-        except Exception as e:
-            logger.error(f"Error in main loop: {e}")
-
-    if config['capture']['mode'] == 'obs_websocket':
-        obs_client.disconnect()
-    else:
-        camera_manager.release_camera()
-
-    logger.info("Disconnected from capture source")
-    logger.info(f"Total frames processed: {frame_count}")
-    logger.info(f"Average processing time: {total_time/frame_count:.4f}s")
-    logger.info(f"Effective FPS: {frame_count/total_time:.2f}")
+    logger.info("Starting frame processor...")
+    frame_processor = FrameProcessor(config, obs_client, board_processor, websocket_server)
+    
+    try:
+        asyncio.run(frame_processor.run())
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user, shutting down...")
+    except Exception as e:
+        logger.error(f"Unexpected error in start_capture_loop: {str(e)}", exc_info=True)
+    finally:
+        logger.info("Exiting capture loop")
 
 # Start application
 if __name__ == "__main__":
@@ -261,8 +190,8 @@ if __name__ == "__main__":
         # Start capture loop
         start_capture_loop()
     except KeyboardInterrupt:
-        print("\nInterrupted by user, shutting down...")
+        logger.info("\nInterrupted by user, shutting down...")
     except Exception as e:
-        logger.exception(f"Unhandled exception: {e}")
+        logger.exception(f"Unhandled exception: {str(e)}")
     finally:
-        print("Exiting...")
+        logger.info("Exiting...")
