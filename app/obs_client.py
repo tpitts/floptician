@@ -116,7 +116,7 @@ class OBSClient:
             # Refresh the browser source
             try:
                 self.client.press_input_properties_button("Floptician", "refreshnocache")
-                logger.info("Refreshed Floptician browser source.")
+                logger.debug("Refreshed Floptician browser source.")
             except Exception as e:
                 logger.warning(f"Failed to refresh Floptician browser source: {str(e)}")
 
@@ -138,8 +138,8 @@ class OBSClient:
             logger.info("Creating new Floptician overlay")
             settings = {
                 "url": f"http://{self.config['host']}:{self.config['http_port']}/",
-                "width": 1920,
-                "height": 1080
+                "width": 720,
+                "height": 1280
             }
             self.client.create_input(current_scene, "Floptician", "browser_source", settings, True)
             logger.info("Floptician overlay added to the current scene.")
