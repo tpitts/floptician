@@ -4,6 +4,7 @@ import logging
 from collections import deque
 from enum import Enum
 from app.yolo_processor import YOLOProcessor
+from app.community_card_detector import CommunityCardDetector  # New import
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +18,14 @@ class TransitionState(Enum):
     DISAPPEARING = "Disappearing"
 
 class BoardProcessor:
-    MAX_HISTORY_SIZE = 1000  # Adjust if memory usage becomes an issue
-    MIN_CARDS_IN_ROW = 3  # Constant value because board is always at least 3 cards
+    MAX_HISTORY_SIZE = 1000
 
     def __init__(self, config: Dict[str, Any]):
         self.yolo_processor = YOLOProcessor(config['yolo']['model'], 
                                             config['yolo']['confidence_threshold'],
                                             config['yolo']['overlap_threshold'])
         self.config = config['board_processor']
+        self.community_card_detector = CommunityCardDetector(self.config)  # New instance
         self.frame_id = 0
         self.board_state = BoardState.NOT_SHOWING
         self.transition_state = TransitionState.NONE
@@ -34,35 +35,27 @@ class BoardProcessor:
         self.transition_start_time = None
 
     def process_frame(self, frame) -> Dict[str, Any]:
-        """
-        Process a single video frame to detect community cards and determine board state.
-        Returns a dictionary with detection results and debug information.
-        """
         self.frame_id += 1
         start_time = time.time()
-        logger.info('processing frame!!!!!')
         try:
-            filtered_detections = self.yolo_processor.process_frame(frame) or []  # Ensure it's always a list
-            detected_board = self._detect_community_cards(filtered_detections)
-            
+            filtered_detections = self.yolo_processor.process_frame(frame) or []
+            detected_board = self.community_card_detector.detect_community_cards(filtered_detections)  # Updated
+            # Sort the cards first by y, then by x
+            sorted_board = sorted(detected_board, key=lambda card: (card['y'], card['x']))
+            # Extract only the card values in the sorted order
+            card_values = [card['card'] for card in sorted_board]
+            logger.debug(f"Detected board: {card_values}")
             new_state, new_transition_state, detected_board, displayed_board = self._update_board_state(detected_board)
             
             processing_time = time.time() - start_time
 
-            # Remove bounding boxes from detected board
-            for card_info in detected_board:
-                if 'box' in card_info:
-                    del card_info['box']
-            
-            # Remove bounding boxes from displayed board
-            for card_info in displayed_board:
-                if 'box' in card_info:
-                    del card_info['box']
+            # Remove bounding boxes from detected board and displayed board
+            detected_board = self._remove_bounding_boxes(detected_board)
+            displayed_board = self._remove_bounding_boxes(displayed_board)
 
-            # Return format must remain consistent for backwards compatibility
             return {
                 "timestamp": time.time(),
-                "state": new_state,  # Return the BoardState enum object
+                "state": new_state,
                 "board": displayed_board,
                 "debug_info": {
                     "detections": [
@@ -71,8 +64,8 @@ class BoardProcessor:
                     ],
                     "processing_time": processing_time,
                     "frame_id": self.frame_id,
-                    "current_state": new_state,  # Return the BoardState enum object
-                    "transition_state": new_transition_state,  # Include the TransitionState
+                    "current_state": new_state,
+                    "transition_state": new_transition_state,
                     "detected_board": detected_board
                 }
             }
@@ -80,7 +73,7 @@ class BoardProcessor:
             logger.error(f"Error processing frame: {str(e)}")
             return {
                 "timestamp": time.time(),
-                "state": BoardState.NOT_SHOWING,  # Return the BoardState enum object
+                "state": BoardState.NOT_SHOWING,
                 "board": [],
                 "debug_info": {
                     "current_state": BoardState.NOT_SHOWING,
@@ -88,46 +81,6 @@ class BoardProcessor:
                     "error": str(e)
                 }
             }
-        
-    def _detect_community_cards(self, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Identify community cards from detections by grouping them into rows based on vertical alignment.
-        """
-        if not detections:
-            return []
-
-        def calculate_center(box):
-            x1, y1, x2, y2 = box
-            return [(x1 + x2) / 2, (y1 + y2) / 2]
-
-        centers = [(d, calculate_center(d['box'])) for d in detections]
-        if not centers:
-            return []
-
-        centers = sorted(centers, key=lambda c: c[1][0])  # Sort by x-coordinate
-
-        rows = []
-        current_row = [centers[0]]
-
-        for (detection, center) in centers[1:]:
-            prev_center = current_row[-1][1]
-            box_height = detection['box'][3] - detection['box'][1]
-            threshold = box_height * self.config['vertical_alignment_threshold']
-
-            if abs(center[1] - prev_center[1]) < threshold:
-                current_row.append((detection, center))
-            else:
-                rows.append(current_row)
-                current_row = [(detection, center)]
-
-        rows.append(current_row)
-
-        community_cards = []
-        for row in rows:
-            if len(row) >= self.MIN_CARDS_IN_ROW:
-                community_cards.extend([detection for detection, center in row])
-
-        return community_cards
 
     def _update_board_state(self, detected_board: List[Dict]) -> Tuple[BoardState, TransitionState, List[Dict], List[Dict]]:
         """
@@ -135,7 +88,6 @@ class BoardProcessor:
         Returns the current board state, transition state, detected board, and displayed board.
         """
         self.detection_history.append(detected_board)
-        logger.debug(f"Updating board state. Current: {self.board_state}, Transition: {self.transition_state}")
 
         if self.board_state == BoardState.NOT_SHOWING:
             if self.transition_state == TransitionState.NONE:
@@ -205,8 +157,6 @@ class BoardProcessor:
                         self.last_state_change = time.time()
                 else: 
                     logger.debug("Remaining in SHOWING/APPEARING state")
-
-        logger.info(f"Updated state: {self.board_state}/{self.transition_state}, Detected board: {[card['card'] for card in detected_board]}")
         
         return self.board_state, self.transition_state, detected_board, self.stable_board
 
