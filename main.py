@@ -2,17 +2,12 @@ import json
 import threading
 import time
 import os
-import asyncio
 from datetime import datetime
-from dataclasses import dataclass
-from collections import deque
 import numpy as np
-import cv2
 import yaml
 import logging
 import argparse
 from aioconsole import ainput
-from enum import Enum
 from typing import Any, Dict
 from app.custom_http_server import start_http_server
 from app.custom_websocket_server import WebSocketServer
@@ -20,6 +15,23 @@ from app.board_processor import BoardProcessor, BoardState
 from app.obs_client import OBSClient
 from app.camera_manager import CameraManager
 from app.frame_processor import FrameProcessor  # Import the new FrameProcessor
+
+
+text = """
+$$$$$$$$\\ $$\\                      $$\\     $$\\           $$\\                     
+$$  _____|$$ |                     $$ |    \\__|          \\__|                    
+$$ |      $$ | $$$$$$\\   $$$$$$\\ $$$$$$\\   $$\\  $$$$$$$\\ $$\\  $$$$$$\\  $$$$$$$\\  
+$$$$$\\    $$ |$$  __$$\\ $$  __$$\\\\_$$  _|  $$ |$$  _____|$$ | \\____$$\\ $$  __$$\\ 
+$$  __|   $$ |$$ /  $$ |$$ /  $$ | $$ |    $$ |$$ /      $$ | $$$$$$$ |$$ |  $$ |
+$$ |      $$ |$$ |  $$ |$$ |  $$ | $$ |$$\\ $$ |$$ |      $$ |$$  __$$ |$$ |  $$ |
+$$ |      $$ |\\$$$$$$  |$$$$$$$  | \\$$$$  |$$ |\\$$$$$$$\\ $$ |\\$$$$$$$ |$$ |  $$ |
+\\__|      \\__| \\______/ $$  ____/   \\____/ \\__| \\_______|\\__| \\_______|\\__|  \\__|
+                        $$ |                                                     
+                        $$ |                                                     
+                        \\__|                                                     
+"""
+
+print(text)
 
 # Configuration
 CONFIG_FILE = 'config.yaml'
@@ -57,7 +69,7 @@ def configure_logging(debug_mode):
     # Add stream handler
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging_level)
-    stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    stream_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(module)s:%(lineno)d | %(message)s", datefmt="%H:%M:%S"))
     root_logger.addHandler(stream_handler)
 
     # Suppress YOLO logging
@@ -156,12 +168,12 @@ def start_capture_loop():
     else:
         logger.error(f"Invalid capture mode: {config['capture']['mode']}. Exiting...")
         return
-
+    
     logger.info("Starting frame processor...")
     frame_processor = FrameProcessor(config, obs_client, board_processor, websocket_server)
     
     try:
-        asyncio.run(frame_processor.run())
+        frame_processor.run()
     except KeyboardInterrupt:
         logger.info("Interrupted by user, shutting down...")
     except Exception as e:
@@ -185,7 +197,7 @@ if __name__ == "__main__":
         logger.info("WebSocket server thread started")
 
         # Give the servers a moment to start
-        time.sleep(2)
+        time.sleep(0.6)
 
         # Start capture loop
         start_capture_loop()
