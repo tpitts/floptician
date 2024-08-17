@@ -14,7 +14,7 @@ capture:
   mode: 'direct_webcam'  # 'obs_websocket' or 'direct_webcam'
   width: 1280
   height: 720
-  fps: 5
+  fps: 2
 
 yolo:
   model: 'models/best.pt'
@@ -22,8 +22,8 @@ yolo:
   overlap_threshold: 0.80
 
 board_processor:
-  vertical_alignment_threshold: 0.25
-  min_frames_to_show: 2
-  min_ms_to_show: 800
-  min_frames_to_remove: 4
-  min_ms_to_remove: 3500
+  vertical_alignment_threshold: 0.20
+  min_frames_to_show: 3
+  min_ms_to_show: 1000
+  min_frames_to_remove: 5
+  min_ms_to_remove: 4000
