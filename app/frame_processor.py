@@ -12,6 +12,10 @@ from app.custom_websocket_server import WebSocketServer
 import sys
 import os
 
+if os.name != 'nt':  # 'nt' is the name for Windows in Python's os module
+    import termios
+    import fcntl
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -62,6 +66,9 @@ class FrameProcessor:
             self.old_settings = termios.tcgetattr(self.fd)
             self.setup_unix_input()
 
+        # Determine if the application is running in debug mode
+        self.debug_mode = config.get('debug', False)
+
     def setup_unix_input(self):
         """Set up non-blocking input for Unix-like systems."""
         new_settings = termios.tcgetattr(self.fd)
@@ -87,6 +94,12 @@ class FrameProcessor:
                 success, frame = self.config['capture']['camera_manager'].get_frame()
                 if not success:
                     frame = None
+
+            # if frame is not None:
+                # Save the frame to a file before returning
+                # file_name = f"frame_{self.last_frame_id}.png"
+                # cv2.imwrite(file_name, frame)
+                # logger.info(f"Frame saved as {file_name}")
 
             self.last_frame_id += 1
             return FrameInfo(self.last_frame_id, frame, time.time())
@@ -126,6 +139,11 @@ class FrameProcessor:
             result['processing_time'] = processing_time
 
             logger.debug(f"Frame {result['frame_id']} | Processing time: {result['processing_time']:.3f}s")
+
+
+            # Remove debug_info if in debug mode
+            if not self.debug_mode and 'debug_info' in result:
+                del result['debug_info']
 
             # Log performance metrics periodically
             if self.frame_count % 100 == 0:

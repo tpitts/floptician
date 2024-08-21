@@ -1,6 +1,10 @@
 import platform
-import subprocess
 import cv2
+import subprocess
+
+# Importing necessary libraries for macOS
+if platform.system() == 'Darwin':
+    from AVFoundation import AVCaptureDevice, AVMediaTypeVideo
 
 # For Windows, we use pygrabber to detect cameras. This is only imported on Windows systems.
 if platform.system() == 'Windows':
@@ -12,7 +16,7 @@ class CameraManager:
     
     This class provides functionality to:
     1. Detect available cameras on the system.
-    2. Get camera names (uses pygrabber on Windows for more accurate names).
+    2. Get camera names (uses pygrabber on Windows for more accurate names, and AVFoundation on macOS).
     3. Open a selected camera.
     4. Capture and display video frames.
 
@@ -32,9 +36,22 @@ class CameraManager:
         List of dicts, each containing 'camera_index' and 'camera_name'.
         """
         if platform.system() == 'Windows':
-            return self._get_windows_cameras()
+            cameras = self._get_windows_cameras()
+        elif platform.system() == 'Darwin':  # macOS specific method
+            cameras = self._get_macos_cameras()
         else:
-            return self._get_generic_cameras()
+            cameras = self._get_generic_cameras()
+
+        # Sort cameras by their names to ensure consistent ordering
+        cameras.sort(key=lambda cam: cam['camera_name'])
+        return cameras
+
+    def _get_macos_cameras(self):
+        """
+        macOS-specific method to get camera information using AVFoundation.
+        """
+        devices = AVCaptureDevice.devicesWithMediaType_(AVMediaTypeVideo)
+        return [{'camera_index': i, 'camera_name': device.localizedName()} for i, device in enumerate(devices)]
 
     def _get_windows_cameras(self):
         """
@@ -46,7 +63,7 @@ class CameraManager:
 
     def _get_generic_cameras(self):
         """
-        Generic method to detect cameras using OpenCV, used for non-Windows platforms.
+        Generic method to detect cameras using OpenCV, used for non-Windows and non-macOS platforms.
         """
         camera_indexes = self._get_camera_indexes()
         return self._add_camera_information(camera_indexes)
@@ -69,7 +86,7 @@ class CameraManager:
 
     def _add_camera_information(self, camera_indexes):
         """
-        Helper method to add camera names to indexes. 
+        Helper method to add camera names to indexes.
         Uses system commands on Linux for more detailed names.
         """
         cameras = []

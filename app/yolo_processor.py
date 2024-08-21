@@ -1,5 +1,8 @@
 import logging
 import os
+import cv2
+import numpy as np
+import platform
 from ultralytics import YOLO
 from typing import Dict, List, Any
 
@@ -13,10 +16,26 @@ class YOLOProcessor:
         self.model = YOLO(model_path, verbose=False)
         self.confidence_threshold = confidence_threshold
         self.overlap_threshold = overlap_threshold
+        self.is_apple_silicon = self._detect_apple_silicon()
+
+    def _detect_apple_silicon(self) -> bool:
+        """
+        Detect if the system is running on Apple Silicon (M1, M1 Pro, M1 Max, M2, etc.).
+        """
+        return platform.system() == "Darwin" and platform.machine() == "arm64"
 
     def process_frame(self, frame) -> List[Dict[str, Any]]:
         try:
-            results = self.model(frame)
+            # Log the dimensions of the frame
+            frame_height, frame_width = frame.shape[:2]
+            logger.debug(f"Processing frame with dimensions: {frame_width}x{frame_height}")
+
+            # Process the frame with the YOLO model using the appropriate device
+            if self.is_apple_silicon:
+                results = self.model(frame, device="mps")
+            else:
+                results = self.model(frame)  # YOLO will select the best available device
+
             detections = self._extract_detections(results)
             filtered_detections = self._filter_detections(detections)
             return filtered_detections
