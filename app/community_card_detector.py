@@ -152,7 +152,11 @@ class CommunityCardDetector:
             return community_cards
 
         for y, row in enumerate(rows[:2], start=1):
-            for x, card in enumerate(row, start=1):
+
+            # Sort the row by the x-coordinate (smallest to largest, i.e., left to right)
+            sorted_row = sorted(row, key=lambda card: (card['box'][0] + card['box'][2]) / 2)
+
+            for x, card in enumerate(sorted_row, start=1):
                 x_coord = x
                 # Only in Chihuahua configuration, 5th card gets x=6
                 if configuration == BoardConfiguration.CHIHUAHUA and x == 5:

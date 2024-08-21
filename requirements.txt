@@ -18,7 +18,14 @@ obsws-python
 # YOLO model from ultralytics
 ultralytics
 
+# other
+aioconsole
+
 # Windows-specific dependencies
 # Run these commands manually on Windows
 # pip install msvcrt
 # pip install pygrabber
+
+# Mac-Specific dependencies
+pyobjc
+pyobjc-framework-AVFoundation
