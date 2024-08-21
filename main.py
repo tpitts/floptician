@@ -82,11 +82,18 @@ parser = argparse.ArgumentParser(description='Floptician card detection system')
 parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 args = parser.parse_args()
 
-# Set up logging
-configure_logging(config.get('debug', False) or args.debug)
+# If the --debug flag is provided, override the config value
+if args.debug:
+    config['debug'] = True
+
+# Set up logging based on the updated config
+configure_logging(config.get('debug', False))
 
 # Define the logger
 logger = logging.getLogger(__name__)
+
+if config['debug']:
+    logger.debug("Debug mode is enabled.")
 
 websocket_server = WebSocketServer(config['host'], config['websocket_port'])
 

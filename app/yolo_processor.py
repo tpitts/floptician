@@ -26,7 +26,10 @@ class YOLOProcessor:
 
     def process_frame(self, frame) -> List[Dict[str, Any]]:
         try:
-            # Log the dimensions of the frame
+            # Log the dimensions of the 
+            target_size = (1280, 1280)
+            frame = self.letterbox_image(frame, target_size)
+            frame = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
             frame_height, frame_width = frame.shape[:2]
             logger.debug(f"Processing frame with dimensions: {frame_width}x{frame_height}")
 
@@ -81,3 +84,30 @@ class YOLOProcessor:
 
         iou = intersection / float(area1 + area2 - intersection)
         return iou
+    
+    def letterbox_image(self, image: np.ndarray, target_size: tuple) -> np.ndarray:
+        """
+        Resize the image to the target size while maintaining the aspect ratio
+        and adding padding to fit the target size.
+        """
+        # Get current size
+        height, width = image.shape[:2]
+
+        # Calculate the scale factor and new size
+        scale = min(target_size[0] / width, target_size[1] / height)
+        new_width = int(width * scale)
+        new_height = int(height * scale)
+
+        # Resize the image
+        resized_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+
+        # Calculate padding
+        delta_w = target_size[0] - new_width
+        delta_h = target_size[1] - new_height
+        top, bottom = delta_h // 2, delta_h - (delta_h // 2)
+        left, right = delta_w // 2, delta_w - (delta_w // 2)
+
+        # Pad the image
+        padded_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+
+        return padded_image
