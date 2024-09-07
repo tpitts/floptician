@@ -18,7 +18,7 @@ capture:
 
 yolo:
   model: 'models/best38-m.pt'
-  mcoreml_model: 'models/best.mlpackage'
+  coreml_model: 'models/best38-m.mlpackage'
   confidence_threshold: 0.70
   overlap_threshold: 0.80
 

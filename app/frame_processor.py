@@ -8,8 +8,15 @@ from enum import Enum
 from app.board_processor import BoardProcessor, BoardState
 import sys
 import os
+import platform
 
 logger = logging.getLogger(__name__)
+
+# Move Unix-specific imports to the top
+if platform.system() != 'Windows':
+    import termios
+    import fcntl
+    import tty
 
 class FrameProcessorState(Enum):
     RUNNING = 1
@@ -56,6 +63,7 @@ class FrameProcessor:
             self.kbhit = msvcrt.kbhit
             self.getch = msvcrt.getch
         else:
+            logger.debug("Loading Unix-specific input handling modules...")   
             import termios
             import fcntl
             import tty
