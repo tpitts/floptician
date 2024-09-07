@@ -116,3 +116,8 @@ dmypy.json
 output/
 
 config.yaml
+
+yolov8m.pt 
+yolov8n.pt 
+yolov8l.pt 
+yolov8s.pt 

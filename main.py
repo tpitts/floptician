@@ -1,21 +1,25 @@
-import json
+import platform
 import threading
 import time
 import os
+import sys
 from datetime import datetime
 import numpy as np
 import yaml
 import logging
 import argparse
+import torch
 from aioconsole import ainput
 from typing import Any, Dict
-from app.custom_http_server import start_http_server
+from app.custom_http_server import HTTPServer
 from app.custom_websocket_server import WebSocketServer
 from app.board_processor import BoardProcessor, BoardState
 from app.obs_client import OBSClient
 from app.camera_manager import CameraManager
-from app.frame_processor import FrameProcessor  # Import the new FrameProcessor
+from app.frame_processor import FrameProcessor
 
+# Create logger after configuring
+logger = logging.getLogger(__name__)
 
 text = """
 $$$$$$$$\\ $$\\                      $$\\     $$\\           $$\\                     
@@ -37,22 +41,37 @@ print(text)
 CONFIG_FILE = 'config.yaml'
 
 def load_config():
-    with open(CONFIG_FILE, 'r') as file:
-        return yaml.safe_load(file)
+    try:
+        with open(CONFIG_FILE, 'r') as file:
+            config = yaml.safe_load(file)
+        if not config:
+            raise ValueError("Config file is empty")
+        return config
+    except FileNotFoundError:
+        print(f"Config file {CONFIG_FILE} not found.")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f"Error parsing config file: {e}")
+        sys.exit(1)
+    except ValueError as e:
+        print(str(e))
+        sys.exit(1)
 
-config = load_config()
+def determine_torch_device() -> str:
+    """
+    Determine the best available PyTorch device for YOLO inference.
 
-# Prefer the environment variable, fall back to config.yaml
-obs_password = os.getenv('OBS_PASSWORD', config['obs']['password'])
-config['obs']['password'] = obs_password
-
-# Create output directory
-OUTPUT_DIR = config['output_dir']
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Create a unique folder for this run
-RUN_OUTPUT_DIR = os.path.join(OUTPUT_DIR, datetime.now().strftime("%Y%m%d_%H%M%S"))
-os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+    Returns:
+        str: 'cuda', 'mps', or 'cpu'
+    """
+    if torch.cuda.is_available():
+        return 'cuda'
+    elif (platform.system() == "Darwin" and
+          platform.machine() == "arm64" and
+          torch.backends.mps.is_available()):
+        return 'mps'
+    else:
+        return 'cpu'
 
 # Set up logging configuration
 def configure_logging(debug_mode):
@@ -77,25 +96,34 @@ def configure_logging(debug_mode):
     logging.getLogger('obsws_python').setLevel(logging.ERROR)
     logging.getLogger('comtypes').setLevel(logging.ERROR)
 
-# Parse command line arguments
-parser = argparse.ArgumentParser(description='Floptician card detection system')
-parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-args = parser.parse_args()
+def initialize_config() -> Dict[str, Any]:
+    """
+    Initialize and return the configuration for the application.
 
-# If the --debug flag is provided, override the config value
-if args.debug:
-    config['debug'] = True
+    Returns:
+        Dict[str, Any]: Initialized configuration.
+    """
+    parser = argparse.ArgumentParser(description='Floptician card detection system')
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    args = parser.parse_args()
+    
+    config = load_config()
 
-# Set up logging based on the updated config
-configure_logging(config.get('debug', False))
+    config['debug'] = args.debug or config.get('debug', False)
+    configure_logging(config['debug'])
 
-# Define the logger
-logger = logging.getLogger(__name__)
+    config['platform'] = platform.system()
+    config['torch_device'] = determine_torch_device()
 
-if config['debug']:
-    logger.debug("Debug mode is enabled.")
+    if config['torch_device'] == 'mps':
+        config['yolo']['model'] = config['yolo'].get('coreml_model', config['yolo']['model'])
 
-websocket_server = WebSocketServer(config['host'], config['websocket_port'])
+    config['obs']['password'] = os.getenv('OBS_PASSWORD', config['obs']['password'])
+
+    config['output_dir'] = os.path.join(config['output_dir'], datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(config['output_dir'], exist_ok=True)
+
+    return config
 
 def select_input(inputs, input_type):
     print(f"Available {input_type}s:")
@@ -114,7 +142,52 @@ def select_input(inputs, input_type):
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-def start_capture_loop():
+def start_servers(config, timeout=5):
+    """Start HTTP and WebSocket servers and ensure they are ready."""
+    http_server = None
+    websocket_server = None
+    try:
+        http_server = HTTPServer(config['host'], config['http_port'], config['html_file'])
+        http_server.start()
+
+        websocket_server = WebSocketServer(config['host'], config['websocket_port'])
+        websocket_server.start()
+
+        start_time = time.time()
+        http_running = ws_running = False
+
+        # Loop until the servers are running or the timeout is reached
+        while time.time() - start_time < timeout:
+            if not http_running and http_server.is_running():
+                logger.info("HTTP server is running")
+                http_running = True
+            
+            if not ws_running and websocket_server.is_running():
+                logger.info("WebSocket server is running")
+                ws_running = True
+
+            if http_running and ws_running:
+                break  # Exit loop if both servers are confirmed running
+            
+            time.sleep(0.1)  # Small sleep to avoid busy-waiting
+
+        # If either server did not start within the timeout, raise an error
+        if not http_running:
+            raise RuntimeError("HTTP server failed to start within the timeout period")
+        if not ws_running:
+            raise RuntimeError("WebSocket server failed to start within the timeout period")
+
+        return http_server, websocket_server
+
+    except Exception as e:
+        logger.error(f"Error starting servers: {e}", exc_info=True)
+        if http_server:
+            http_server.stop()
+        if websocket_server:
+            websocket_server.stop()
+        sys.exit(1)
+
+def start_capture_loop(config, websocket_server):
     if 'capture' not in config:
         logger.error("Error: 'capture' section missing from configuration. Please check your config.yaml file.")
         return
@@ -127,6 +200,7 @@ def start_capture_loop():
 
     try:
         board_processor = BoardProcessor(config)
+        logger.info(f"BoardProcessor started | YOLO model: {config['yolo']['model']} | PyTorch: {config['torch_device']}")
     except ValueError as e:
         logger.error(f"Error initializing BoardProcessor: {str(e)}")
         return
@@ -134,13 +208,13 @@ def start_capture_loop():
     try:
         # Connect to OBS WebSocket regardless of capture mode
         obs_client = OBSClient(config)
-        logger.info(f"Connecting to OBS WebSocket at {config['obs']['host']}:{config['obs']['port']}")
         version_info = obs_client.get_version()
-        logger.info(f"Connected to OBS WebSocket version: {version_info.obs_web_socket_version}")
+        logger.info(f"Connected to OBS WebSocket API {config['obs']['host']}:{config['obs']['port']} "
+            f"using version: {version_info.obs_web_socket_version}")
 
         # Setup OBS overlay
         obs_client.setup_overlay()
-        logger.info("OBS overlay setup complete")
+
     except ConnectionRefusedError:
         logger.error("Error: Unable to connect to OBS. Please ensure OBS is running and the WebSocket server is enabled.")
         return
@@ -188,29 +262,21 @@ def start_capture_loop():
     finally:
         logger.info("Exiting capture loop")
 
-# Start application
+def main():
+    config = initialize_config()
+    
+    if config['debug']:
+        logger.debug("Debug mode is enabled.")
+    logger.info(f"Platform: {config['platform']}")
+    logger.info(f"PyTorch Device: {config['torch_device']}")
+
+    # Start servers and retrieve both HTTP and WebSocket server instances
+    http_server, websocket_server = start_servers(config)
+
+    start_capture_loop(config, websocket_server)
+
+    http_server.stop()
+    websocket_server.stop()
+
 if __name__ == "__main__":
-    try:
-        # Start HTTP server in a new thread
-        http_server_thread = threading.Thread(target=start_http_server, args=(config['host'], config['http_port'], config['html_file']))
-        http_server_thread.daemon = True
-        http_server_thread.start()
-        logger.info("HTTP server thread started")
-
-        # Start WebSocket server in a new thread
-        websocket_server_thread = threading.Thread(target=websocket_server.start)
-        websocket_server_thread.daemon = True
-        websocket_server_thread.start()
-        logger.info("WebSocket server thread started")
-
-        # Give the servers a moment to start
-        time.sleep(0.6)
-
-        # Start capture loop
-        start_capture_loop()
-    except KeyboardInterrupt:
-        logger.info("\nInterrupted by user, shutting down...")
-    except Exception as e:
-        logger.exception(f"Unhandled exception: {str(e)}")
-    finally:
-        logger.info("Exiting...")
+    main()
