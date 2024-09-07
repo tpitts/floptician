@@ -115,8 +115,8 @@ def initialize_config() -> Dict[str, Any]:
     config['platform'] = platform.system()
     config['torch_device'] = determine_torch_device()
 
-    if config['torch_device'] == 'mps':
-        config['yolo']['model'] = config['yolo'].get('coreml_model', config['yolo']['model'])
+    #if config['torch_device'] == 'mps':
+    #    config['yolo']['model'] = config['yolo'].get('coreml_model', config['yolo']['model'])
 
     config['obs']['password'] = os.getenv('OBS_PASSWORD', config['obs']['password'])
 
@@ -200,7 +200,7 @@ def start_capture_loop(config, websocket_server):
 
     try:
         board_processor = BoardProcessor(config)
-        logger.info(f"BoardProcessor started | YOLO model: {config['yolo']['model']} | PyTorch: {config['torch_device']}")
+        logger.info(f"BoardProcessor started | YOLO model: {config['yolo']['model']} | Inference: {config['torch_device']}")
     except ValueError as e:
         logger.error(f"Error initializing BoardProcessor: {str(e)}")
         return
@@ -268,7 +268,7 @@ def main():
     if config['debug']:
         logger.debug("Debug mode is enabled.")
     logger.info(f"Platform: {config['platform']}")
-    logger.info(f"PyTorch Device: {config['torch_device']}")
+    logger.info(f"Inference Device: {config['torch_device']}")
 
     # Start servers and retrieve both HTTP and WebSocket server instances
     http_server, websocket_server = start_servers(config)
