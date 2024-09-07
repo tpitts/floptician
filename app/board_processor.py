@@ -4,7 +4,7 @@ import logging
 from collections import deque
 from enum import Enum
 from app.yolo_processor import YOLOProcessor
-from app.community_card_detector import CommunityCardDetector  # New import
+from app.community_card_detector import CommunityCardDetector
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class BoardProcessor:
                                             config['yolo']['confidence_threshold'],
                                             config['yolo']['overlap_threshold'])
         self.config = config['board_processor']
-        self.community_card_detector = CommunityCardDetector(self.config)  # New instance
+        self.community_card_detector = CommunityCardDetector(self.config)
         self.frame_id = 0
         self.board_state = BoardState.NOT_SHOWING
         self.transition_state = TransitionState.NONE
@@ -39,24 +39,25 @@ class BoardProcessor:
         start_time = time.time()
         try:
             filtered_detections = self.yolo_processor.process_frame(frame) or []
-            detected_board = self.community_card_detector.detect_community_cards(filtered_detections)  # Updated
-            # Sort the cards first by y, then by x
+            detected_board = self.community_card_detector.detect_community_cards(filtered_detections)
             sorted_board = sorted(detected_board, key=lambda card: (card['y'], card['x']))
-            # Extract only the card values in the sorted order
             card_values = [card['card'] for card in sorted_board]
             logger.debug(f"Detected board: {card_values}")
             new_state, new_transition_state, detected_board, displayed_board = self._update_board_state(detected_board)
             
+            # Update x and y coordinates of the stable board
+            updated_displayed_board = self._update_positions(displayed_board, detected_board)
+            
             processing_time = time.time() - start_time
 
-            # Remove bounding boxes from detected board and displayed board
+            # Remove bounding boxes from detected board and updated displayed board
             detected_board = self._remove_bounding_boxes(detected_board)
-            displayed_board = self._remove_bounding_boxes(displayed_board)
+            updated_displayed_board = self._remove_bounding_boxes(updated_displayed_board)
 
             return {
                 "timestamp": time.time(),
                 "state": new_state,
-                "board": displayed_board,
+                "board": updated_displayed_board,
                 "debug_info": {
                     "detections": [
                         {"card": d['card'], "confidence": d['confidence']}
@@ -82,6 +83,20 @@ class BoardProcessor:
                 }
             }
 
+    def _update_positions(self, stable_board: List[Dict], detected_board: List[Dict]) -> List[Dict]:
+        updated_board = []
+        for stable_card in stable_board:
+            for detected_card in detected_board:
+                if stable_card['card'] == detected_card['card']:
+                    updated_card = stable_card.copy()
+                    updated_card['x'] = detected_card['x']
+                    updated_card['y'] = detected_card['y']
+                    updated_board.append(updated_card)
+                    break
+            else:
+                updated_board.append(stable_card)
+        return updated_board
+
     def _update_board_state(self, detected_board: List[Dict]) -> Tuple[BoardState, TransitionState, List[Dict], List[Dict]]:
         """
         Update the state machine based on current detections and history.
@@ -98,7 +113,7 @@ class BoardProcessor:
                 else:
                     logger.debug("Remaining in NOT_SHOWING/NONE state")
             elif self.transition_state == TransitionState.DISAPPEARING:
-                logger.debug("Unexpected state: NOT_SHOWING/DISAPPEARING. Resetting to NOT_SHOWING/NONE")
+                logger.error("Unexpected state: NOT_SHOWING/DISAPPEARING. Resetting to NOT_SHOWING/NONE")
                 self.transition_state = TransitionState.NONE
                 self.last_state_change = time.time()
             elif self.transition_state == TransitionState.APPEARING:
@@ -107,7 +122,7 @@ class BoardProcessor:
                     self.board_state, self.transition_state = self._revert_to_previous_state(detected_board)
                     self.last_state_change = time.time()
                 elif self._meets_appearance_thresholds(detected_board):
-                    logger.debug("Appearance thresholds met, transitioning to SHOWING/NONE")
+                    logger.info("Appearance thresholds met, showing cards")
                     self.board_state = BoardState.SHOWING
                     self.transition_state = TransitionState.NONE
                     self.stable_board = detected_board
@@ -133,7 +148,7 @@ class BoardProcessor:
                     self.transition_state = TransitionState.NONE
                     self.last_state_change = time.time()
                 elif self._meets_removal_thresholds():
-                    logger.debug("Removal thresholds met, transitioning to NOT_SHOWING/NONE")
+                    logger.info("Removal thresholds met, clearing the cards")
                     self.board_state = BoardState.NOT_SHOWING
                     self.transition_state = TransitionState.NONE
                     self.last_state_change = time.time()
@@ -150,7 +165,7 @@ class BoardProcessor:
                     self.transition_state = TransitionState.NONE
                     self.last_state_change = time.time()
                 elif self._meets_appearance_thresholds(detected_board):
-                        logger.debug("Appearance thresholds met, transitioning to SHOWING/NONE")
+                        logger.info("Appearance thresholds met, updating with new cards")
                         self.board_state = BoardState.SHOWING
                         self.transition_state = TransitionState.NONE
                         self.stable_board = detected_board
@@ -159,6 +174,7 @@ class BoardProcessor:
                     logger.debug("Remaining in SHOWING/APPEARING state")
         
         return self.board_state, self.transition_state, detected_board, self.stable_board
+
 
     def _transition_to(self, new_board_state: BoardState, new_transition_state: TransitionState, new_board: List[Dict]) -> Tuple[BoardState, TransitionState, List[Dict], List[Dict]]:
         """

@@ -1,4 +1,5 @@
 import logging
+import torch
 import os
 import cv2
 import numpy as np
@@ -13,10 +14,23 @@ logging.getLogger('ultralytics').setLevel(logging.ERROR)
 
 class YOLOProcessor:
     def __init__(self, model_path: str, confidence_threshold: float, overlap_threshold: float):
-        self.model = YOLO(model_path, verbose=False)
+        # Check for CUDA device and set it
+        self.device = self._select_device()
+        self.model = YOLO(model_path, verbose=False).to(self.device)
         self.confidence_threshold = confidence_threshold
         self.overlap_threshold = overlap_threshold
-        self.is_apple_silicon = self._detect_apple_silicon()
+
+    def _select_device(self) -> str:
+        """
+        Select the best available device: CUDA if available, otherwise MPS on Apple Silicon, 
+        and fallback to CPU.
+        """
+        if torch.cuda.is_available():
+            return 'cuda'
+        elif self._detect_apple_silicon() and torch.backends.mps.is_available():
+            return 'mps'
+        else:
+            return 'cpu'
 
     def _detect_apple_silicon(self) -> bool:
         """
@@ -27,17 +41,13 @@ class YOLOProcessor:
     def process_frame(self, frame) -> List[Dict[str, Any]]:
         try:
             # Log the dimensions of the 
-            target_size = (1280, 1280)
+            target_size = (640, 640)
             frame = self.letterbox_image(frame, target_size)
             frame = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
             frame_height, frame_width = frame.shape[:2]
             logger.debug(f"Processing frame with dimensions: {frame_width}x{frame_height}")
 
-            # Process the frame with the YOLO model using the appropriate device
-            if self.is_apple_silicon:
-                results = self.model(frame, device="mps")
-            else:
-                results = self.model(frame)  # YOLO will select the best available device
+            results = self.model(frame)  # YOLO will select the best available device
 
             detections = self._extract_detections(results)
             filtered_detections = self._filter_detections(detections)
