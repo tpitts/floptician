@@ -1,4 +1,5 @@
 import logging
+import statistics
 from typing import List, Dict, Tuple, Optional
 from enum import Enum, auto
 
@@ -40,31 +41,73 @@ class CommunityCardDetector:
         return self._assign_coordinates(rows, configuration, chihuahua_card)
 
     def _group_cards_into_rows(self, detections: List[Dict]) -> List[List[Dict]]:
-        # Group cards into rows based on vertical proximity
-        def calculate_center(box):
+        def calculate_center(box: Tuple[float, float, float, float]) -> Tuple[float, float]:
             x1, y1, x2, y2 = box
-            return [(x1 + x2) / 2, (y1 + y2) / 2]
+            return ((x1 + x2) / 2, (y1 + y2) / 2)
 
+        if not detections:
+            return []
+
+        # Calculate median width and height for adaptive thresholding
+        widths = [d['box'][2] - d['box'][0] for d in detections]
+        heights = [d['box'][3] - d['box'][1] for d in detections]
+        median_width = statistics.median(widths)
+        median_height = statistics.median(heights)
+
+        # Step 1: Vertical Grouping
         centers = [(d, calculate_center(d['box'])) for d in detections]
-        centers.sort(key=lambda c: c[1][1])
+        centers.sort(key=lambda c: c[1][1])  # Sort by y-coordinate
 
-        rows = []
-        current_row = [centers[0]]
-
+        vertical_groups = []
+        current_group = [centers[0]]
         for detection, center in centers[1:]:
-            prev_center = current_row[-1][1]
-            box_height = detection['box'][3] - detection['box'][1]
-            threshold = box_height * self.vertical_alignment_threshold
-
-            if abs(center[1] - prev_center[1]) < threshold:
-                current_row.append((detection, center))
+            prev_center = current_group[-1][1]
+            vertical_threshold = median_height * self.vertical_alignment_threshold
+            if abs(center[1] - prev_center[1]) < vertical_threshold:
+                current_group.append((detection, center))
             else:
-                if len(current_row) >= self.min_cards_in_row:
-                    rows.append([d for d, _ in sorted(current_row, key=lambda x: x[1][0])])
-                current_row = [(detection, center)]
+                vertical_groups.append(current_group)
+                current_group = [(detection, center)]
+        
+        if current_group:
+            vertical_groups.append(current_group)
 
-        if len(current_row) >= self.min_cards_in_row:
-            rows.append([d for d, _ in sorted(current_row, key=lambda x: x[1][0])])
+        # Step 2: Horizontal Refinement within Vertical Groups
+        rows = []
+        for group in vertical_groups:
+            group.sort(key=lambda c: c[1][0])  # Sort by x-coordinate
+            current_row = [group[0]]
+            for detection, center in group[1:]:
+                prev_detection, prev_center = current_row[-1]
+                horizontal_distance = center[0] - prev_center[0]
+
+                # Adaptive horizontal thresholding
+                if len(current_row) == 1:
+                    horizontal_threshold = 1.75 * median_width
+                elif len(current_row) >= 4:
+                    horizontal_threshold = 3.25 * median_width
+                else:
+                    horizontal_threshold = 2.5 * median_width
+
+                if horizontal_distance < horizontal_threshold:
+                    current_row.append((detection, center))
+                else:
+                    if len(current_row) >= self.min_cards_in_row:
+                        rows.append([d for d, _ in current_row])
+                    current_row = [(detection, center)]
+            
+            if len(current_row) >= self.min_cards_in_row:
+                rows.append([d for d, _ in current_row])
+
+        # Logging and debugging
+        logger.debug(f"Median card width: {median_width:.2f}, height: {median_height:.2f}")
+        logger.debug(f"Number of detections: {len(detections)}")
+        logger.debug(f"Number of vertical groups: {len(vertical_groups)}")
+        logger.debug(f"Number of final rows: {len(rows)}")
+
+        for i, row in enumerate(rows):
+            logger.debug(f"Row {i+1}: {len(row)} cards")
+            logger.debug(f"  Card centers: {[calculate_center(d['box']) for d in row]}")
 
         return rows
 
