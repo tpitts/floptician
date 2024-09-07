@@ -45,6 +45,7 @@
             grid-template-columns: repeat(6, var(--card-width));
             grid-template-rows: var(--card-height) var(--card-height);
             gap: var(--gap);
+            position: relative;  /* Add positioning context for absolute positioned children */
         }
         .card {
             width: var(--card-width);
@@ -160,24 +161,24 @@
         const maxReconnectAttempts = 5;
         let lastMessageTime = Date.now();
         let lastBoardState = null;
-
+    
         const suits = {
             h: { symbol: "♥", color: "text-red" },
             d: { symbol: "♦", color: "text-red" },
             c: { symbol: "♣", color: "text-black" },
             s: { symbol: "♠", color: "text-black" },
         };
-
+    
         function connect() {
             console.log(`Attempting to connect to WebSocket server at ${wsUrl}`);
             socket = new WebSocket(wsUrl);
-
+    
             socket.onopen = function (e) {
                 console.log("Connected to WebSocket server");
                 updateConnectionStatus("Connected");
                 reconnectAttempts = 0;
             };
-
+    
             socket.onmessage = function (event) {
                 console.log("Received message:", event.data);
                 lastMessageTime = Date.now();
@@ -188,11 +189,11 @@
                     console.error("Error parsing message:", error);
                 }
             };
-
+    
             socket.onclose = function (event) {
                 console.log("Connection closed");
                 updateConnectionStatus("Disconnected");
-
+    
                 if (reconnectAttempts < maxReconnectAttempts) {
                     const timeout = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
                     console.log(`Attempting to reconnect in ${timeout / 1000} seconds...`);
@@ -202,26 +203,26 @@
                     console.error("Max reconnection attempts reached. Please refresh the page.");
                 }
             };
-
+    
             socket.onerror = function (error) {
                 console.error("WebSocket Error:", error);
                 updateConnectionStatus("Error");
             };
         }
-
+    
         function updateConnectionStatus(status) {
             const statusElement = document.getElementById("connection-status");
             statusElement.textContent = status;
             statusElement.classList.toggle("hidden", !status);
         }
-
+    
         function getCardDetails(card) {
             const suit = card.slice(-1).toLowerCase();
             let rank = card.slice(0, -1).toUpperCase();
             if (rank === "T") rank = "10";
             return { ...suits[suit], rank };
         }
-
+    
         function updateOverlay(data) {
             console.log("Updating overlay with data:", data);
             const boardElement = document.getElementById("board");
@@ -234,7 +235,10 @@
                     boardElement.innerHTML = "";
                 }
 
+                const currentCards = new Set();
+
                 data.board.forEach((cardInfo) => {
+                    currentCards.add(cardInfo.card);
                     let cardElement = boardElement.querySelector(`[data-card="${cardInfo.card}"]`);
                     if (!cardElement) {
                         cardElement = createCardElement(cardInfo.card);
@@ -242,21 +246,40 @@
                         cardElement.classList.add("card-animated");
                     }
 
-                    cardElement.style.gridColumnStart = cardInfo.x;
-                    
+                    // Prepare the new styles
+                    const newStyles = {
+                        gridColumnStart: cardInfo.x.toString(),
+                        transition: 'all 0.3s ease'
+                    };
+
                     if (cardInfo.y === 2) {
-                        cardElement.style.gridRowStart = 1;
-                        cardElement.style.gridRowEnd = 3;
-                        cardElement.style.alignSelf = 'center';
-                        cardElement.style.zIndex = '10';
+                        // Middle pseudo-row
+                        Object.assign(newStyles, {
+                            gridRowStart: '1',
+                            gridRowEnd: '3',
+                            alignSelf: 'center',
+                            zIndex: '10'
+                        });
                     } else {
-                        cardElement.style.gridRowStart = cardInfo.y === 1 ? 1 : 2;
-                        cardElement.style.alignSelf = 'start';
-                        cardElement.style.zIndex = '1';
+                        // Top or bottom row
+                        Object.assign(newStyles, {
+                            gridRowStart: cardInfo.y === 1 ? '1' : '2',
+                            alignSelf: 'start',
+                            zIndex: '1'
+                        });
                     }
+
+                    // Apply new styles in a separate frame to ensure smooth transition
+                    requestAnimationFrame(() => {
+                        Object.assign(cardElement.style, newStyles);
+                    });
+
+                    // Update data attributes for debugging
+                    cardElement.setAttribute('data-x', cardInfo.x);
+                    cardElement.setAttribute('data-y', cardInfo.y);
                 });
 
-                const currentCards = new Set(data.board.map(card => card.card));
+                // Remove cards that are no longer in the board state
                 Array.from(boardElement.children).forEach(card => {
                     if (!currentCards.has(card.getAttribute('data-card'))) {
                         card.classList.add("fade-out");
@@ -265,7 +288,7 @@
                 });
 
                 boardElement.classList.remove("hidden");
-                lastBoardState = data.board.map(card => card.card);
+                lastBoardState = Array.from(currentCards);
             } else if (lastBoardState !== null) {
                 Array.from(boardElement.children).forEach(card => {
                     card.classList.add("fade-out");
@@ -277,6 +300,7 @@
                 lastBoardState = null;
             }
 
+            // Update debug info
             if (data.debug_info) {
                 let debugHtml = `
                     <p>State: ${data.state}</p>
@@ -284,9 +308,16 @@
                     <p>Processing Time: ${data.debug_info.processing_time.toFixed(4)}s</p>
                     <p>Frame ID: ${data.debug_info.frame_id}</p>
                     <p>Board State: ${data.debug_info.current_state}</p>
-                    <p>Detections:</p>
+                    <p>Detected Board:</p>
                     <ul>
                 `;
+                
+                data.board.forEach((cardInfo) => {
+                    debugHtml += `<li>${cardInfo.card} (${cardInfo.x}, ${cardInfo.y})</li>`;
+                });
+                
+                debugHtml += "</ul><p>All Detections:</p><ul>";
+                
                 data.debug_info.detections.forEach((d) => {
                     debugHtml += `<li>${d.card} (${d.confidence.toFixed(2)})</li>`;
                 });
@@ -300,7 +331,7 @@
                 updateConnectionStatus(null);
             }
         }
-
+    
         function createCardElement(card) {
             const cardElement = document.createElement("div");
             cardElement.className = "card";
@@ -312,7 +343,7 @@
             `;
             return cardElement;
         }
-
+    
         function clearDisplayIfInactive() {
             if (Date.now() - lastMessageTime > 10000) {
                 console.log("No messages received for 10 seconds, clearing display");
@@ -329,12 +360,12 @@
                 lastBoardState = null;
             }
         }
-
+    
         window.onload = function() {
             connect();
             setInterval(clearDisplayIfInactive, 1000);
         };
-
+    
         window.addEventListener("error", function (event) {
             console.error("Uncaught error:", event.error);
         });

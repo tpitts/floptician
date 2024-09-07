@@ -12,12 +12,13 @@ obs:
 
 capture:
   mode: 'direct_webcam'  # 'obs_websocket' or 'direct_webcam'
-  width: 1280
-  height: 720
+  width: 640
+  height: 360
   fps: 1.8
 
 yolo:
-  model: 'models/best.mlpackage'
+  model: 'models/best38-m.pt'
+  mcoreml_model: 'models/best.mlpackage'
   confidence_threshold: 0.70
   overlap_threshold: 0.80
 

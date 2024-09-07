@@ -94,21 +94,21 @@ class OBSClient:
         """
         scenes = self.client.get_scene_list().scenes
         scene_names = [scene['sceneName'] for scene in scenes]
-        logger.info(f"Available scenes: {scene_names}")
+        logger.debug(f"Available scenes: {scene_names}")
 
         current_scene = self.client.get_current_program_scene().current_program_scene_name
-        logger.info(f"Current scene: {current_scene}")
+        logger.debug(f"Current scene: {current_scene}")
 
         inputs = self.client.get_input_list().inputs
         input_names = [input['inputName'] for input in inputs]
 
         if "Floptician" in input_names:
-            logger.info("Floptician source already exists. Updating its URL, refreshing, and making it visible.")
+            logger.debug("Floptician source already exists. Updating its URL, refreshing, and making it visible.")
             settings = {
                 "url": f"http://{self.config['host']}:{self.config['http_port']}/"
             }
             self.client.set_input_settings("Floptician", settings, True)
-            logger.info(f"Updated Floptician URL to http://{self.config['host']}:{self.config['http_port']}/")
+            logger.debug(f"Updated Floptician URL to http://{self.config['host']}:{self.config['http_port']}/")
 
             Floptician_input = next(input for input in inputs if input['inputName'] == 'Floptician')
             logger.debug(f"Floptician input structure: {Floptician_input}")
@@ -128,21 +128,22 @@ class OBSClient:
                 item_id = Floptician_item.get('sceneItemId')
                 if item_id is not None:
                     self.client.set_scene_item_enabled(current_scene, item_id, True)
-                    logger.info("Set Floptician source to be visible.")
+                    logger.debug("Set Floptician source to be visible.")
                 else:
                     logger.warning("Could not find sceneItemId for Floptician")
             else:
                 logger.warning("Could not find Floptician in the current scene items")
 
         else:
-            logger.info("Creating new Floptician overlay")
+            logger.debug("Creating new Floptician overlay")
             settings = {
                 "url": f"http://{self.config['host']}:{self.config['http_port']}/",
                 "width": 720,
                 "height": 1280
             }
             self.client.create_input(current_scene, "Floptician", "browser_source", settings, True)
-            logger.info("Floptician overlay added to the current scene.")
+        
+        logger.info(f"Floptician OBS overlay active on scene: {current_scene}")
 
     def disconnect(self):
         """Disconnect from the OBS WebSocket server."""
