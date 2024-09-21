@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 import platform
 from ultralytics import YOLO
+import coremltools as ct
+from PIL import Image
 from typing import Dict, List, Any
 
 # Set YOLOv8 to quiet mode
@@ -16,9 +18,18 @@ class YOLOProcessor:
     def __init__(self, model_path: str, confidence_threshold: float, overlap_threshold: float):
         # Check for CUDA device and set it
         self.device = self._select_device()
-        self.model = YOLO(model_path, verbose=False).to(self.device)
         self.confidence_threshold = confidence_threshold
         self.overlap_threshold = overlap_threshold
+
+        # Determine the model type and load the appropriate model
+        if model_path.endswith('.pt'):
+            self.model_type = 'pt'
+            self.model = YOLO(model_path, verbose=False).to(self.device)
+        elif model_path.endswith('.mlpackage'):
+            self.model_type = 'mlpackage'
+            self.model = self._load_coreml_model(model_path)
+        else:
+            raise ValueError("Unsupported model format. Please provide a .pt or .mlpackage file.")
 
     def _select_device(self) -> str:
         """
@@ -38,18 +49,45 @@ class YOLOProcessor:
         """
         return platform.system() == "Darwin" and platform.machine() == "arm64"
 
+    def _load_coreml_model(self, model_path: str):
+        """
+        Load the Core ML model.
+        """
+        try:
+            model = ct.models.MLModel(model_path)
+            logger.info(f"Successfully loaded Core ML model from {model_path}")
+
+            # Log input and output names for debugging purposes
+            logger.info(f"Core ML model input names: {model.input_description}")
+            logger.info(f"Core ML model output names: {model.output_description}")
+
+            return model
+        except Exception as e:
+            logger.error(f"Failed to load Core ML model from {model_path}: {e}")
+            raise
+
     def process_frame(self, frame) -> List[Dict[str, Any]]:
         try:
-            # Log the dimensions of the 
+            # Log the dimensions of the frame
             target_size = (640, 640)
             frame = self.letterbox_image(frame, target_size)
             frame = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
             frame_height, frame_width = frame.shape[:2]
             logger.debug(f"Processing frame with dimensions: {frame_width}x{frame_height}")
 
-            results = self.model(frame)  # YOLO will select the best available device
+            if self.model_type == 'pt':
+                # Use PyTorch model for inference
+                results = self.model(frame)
+                detections = self._extract_detections(results)
+            elif self.model_type == 'mlpackage':
+                # Use Core ML model for inference
+                input_image = Image.fromarray(frame)
+                input_data = {'image': input_image}  # Use the correct input key
+                result = self.model.predict(input_data)
+                detections = self._extract_detections_coreml(result)
+            else:
+                raise ValueError("Unsupported model type.")
 
-            detections = self._extract_detections(results)
             filtered_detections = self._filter_detections(detections)
             return filtered_detections
         except Exception as e:
@@ -67,6 +105,44 @@ class YOLOProcessor:
                     'confidence': round(float(conf), 3),
                     'box': box.tolist()
                 })
+        return detections
+
+    def _extract_detections_coreml(self, result) -> List[Dict[str, Any]]:
+        """
+        Extract detections from Core ML model output.
+        """
+        detections = []
+        # Use the correct output name from your Core ML model
+        output_key = 'var_1140'
+        output_data = result[output_key]
+
+        # Log the type, shape, and content of the output data for debugging
+        logger.debug(f"Output type: {type(output_data)}")
+        logger.debug(f"Output shape: {output_data.shape}")
+        logger.debug(f"Output data: {output_data}")
+
+        # Handle the output data based on its type
+        if isinstance(output_data, np.ndarray):
+            # Flatten the output to ensure correct indexing
+            flattened_output = output_data.reshape(-1, 8400)  # Adjust based on your output structure
+            
+            for detection in flattened_output:
+                # Assuming the detection array contains the following:
+                # [class, confidence, x1, y1, x2, y2, ...]
+                class_id = int(detection[0])  # Access class ID
+                confidence = float(detection[1])  # Access confidence score
+                bbox = detection[2:6].tolist()  # Access bounding box coordinates [x1, y1, x2, y2]
+                
+                # Only add detections above a confidence threshold
+                if confidence >= self.confidence_threshold:
+                    detections.append({
+                        'card': class_id,
+                        'confidence': round(confidence, 3),
+                        'box': bbox
+                    })
+        else:
+            logger.error("Unsupported output data format from Core ML model.")
+    
         return detections
 
     def _filter_detections(self, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
