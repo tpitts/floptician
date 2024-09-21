@@ -17,7 +17,7 @@ capture:
   fps: 1.8
 
 yolo:
-  model: 'models/best38-m.pt'
+  model: 'models/best43.pt'
   mcoreml_model: 'models/best.mlpackage'
   confidence_threshold: 0.70
   overlap_threshold: 0.80
