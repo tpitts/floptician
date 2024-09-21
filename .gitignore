@@ -93,6 +93,7 @@ env.bak/
 venv.bak/
 flopenv/
 oldpyvenv/
+resources/
 
 # Spyder project settings
 .spyderproject

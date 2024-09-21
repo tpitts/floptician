@@ -12,11 +12,11 @@ from collections import namedtuple
 
 # Constants
 INPUT_SIZE = (1280, 720)
-LETTERBOX_SIZE = (1280, 1280)
-OUTPUT_SIZE = (640, 640)
-CARD_SIZES = [65, 90, 130]  # Small, Medium, Large
-BLUR_FACTORS = [0.0, 2, 4, 6]  # No blur, Light, Medium, Heavy
-NUM_IMAGES = 5000
+LETTERBOX_SIZE = (1280, 720)
+OUTPUT_SIZE = (1280, 720)
+CARD_SIZES = [63, 91, 120]  # Small, Medium, Large
+BLUR_FACTORS = [0.0, 0.33, 0.67, 1.0]  # No blur, Light, Medium, Heavy
+NUM_IMAGES = 3000
 MAX_CARD_BACKS = 13
 CARDS_PER_IMAGE = 13
 MAX_OVERLAP = 0.03
