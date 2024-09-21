@@ -21,6 +21,7 @@ class BoardProcessor:
     MAX_HISTORY_SIZE = 1000
 
     def __init__(self, config: Dict[str, Any]):
+        
         self.yolo_processor = YOLOProcessor(config['yolo']['model'], 
                                             config['yolo']['confidence_threshold'],
                                             config['yolo']['overlap_threshold'])
