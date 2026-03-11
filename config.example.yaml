@@ -17,7 +17,7 @@ capture:
   fps: 1.8
 
 yolo:
-  model: 'models/yolov8l-2024-09-18.pt'
+  model: 'models/yolov8l-2026-03-10.pt'
   confidence_threshold: 0.70
   overlap_threshold: 0.80
 
