@@ -5,12 +5,12 @@ import os
 import sys
 from datetime import datetime
 import numpy as np
-import yaml
 import logging
 import argparse
 import torch
 from aioconsole import ainput
 from typing import Any, Dict
+from app.config_utils import load_config
 from app.custom_http_server import HTTPServer
 from app.custom_websocket_server import WebSocketServer
 from app.board_processor import BoardProcessor, BoardState
@@ -36,26 +36,6 @@ $$ |      $$ |\\$$$$$$  |$$$$$$$  | \\$$$$  |$$ |\\$$$$$$$\\ $$ |\\$$$$$$$ |$$ |
 """
 
 print(text)
-
-# Configuration
-CONFIG_FILE = 'config.yaml'
-
-def load_config():
-    try:
-        with open(CONFIG_FILE, 'r') as file:
-            config = yaml.safe_load(file)
-        if not config:
-            raise ValueError("Config file is empty")
-        return config
-    except FileNotFoundError:
-        print(f"Config file {CONFIG_FILE} not found.")
-        sys.exit(1)
-    except yaml.YAMLError as e:
-        print(f"Error parsing config file: {e}")
-        sys.exit(1)
-    except ValueError as e:
-        print(str(e))
-        sys.exit(1)
 
 def determine_torch_device() -> str:
     """
@@ -104,10 +84,15 @@ def initialize_config() -> Dict[str, Any]:
         Dict[str, Any]: Initialized configuration.
     """
     parser = argparse.ArgumentParser(description='Floptician card detection system')
+    parser.add_argument('--config', help='Path to the config YAML file')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     args = parser.parse_args()
-    
-    config = load_config()
+
+    try:
+        config = load_config(args.config)
+    except (FileNotFoundError, ValueError) as e:
+        print(str(e))
+        sys.exit(1)
 
     config['debug'] = args.debug or config.get('debug', False)
     configure_logging(config['debug'])
@@ -118,7 +103,7 @@ def initialize_config() -> Dict[str, Any]:
     #if config['torch_device'] == 'mps':
     #    config['yolo']['model'] = config['yolo'].get('coreml_model', config['yolo']['model'])
 
-    config['obs']['password'] = os.getenv('OBS_PASSWORD', config['obs']['password'])
+    config['obs']['password'] = os.getenv('OBS_PASSWORD', config['obs'].get('password', ''))
 
     config['output_dir'] = os.path.join(config['output_dir'], datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(config['output_dir'], exist_ok=True)

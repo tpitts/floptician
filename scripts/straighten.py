@@ -2,7 +2,9 @@ import cv2
 import numpy as np
 from PIL import Image
 import os
+import argparse
 from pathlib import Path
+from _common import resources_path
 
 def straighten_and_crop_card(image_path, output_path):
     # Open image with Pillow to preserve transparency
@@ -28,7 +30,7 @@ def straighten_and_crop_card(image_path, output_path):
         # Get the rotated rectangle that bounds the contour
         rect = cv2.minAreaRect(card_contour)
         box = cv2.boxPoints(rect)
-        box = np.int0(box)
+        box = np.intp(box)
         
         # Get the angle of rotation
         angle = rect[2]
@@ -60,7 +62,7 @@ def straighten_and_crop_card(image_path, output_path):
             
             # Save the straightened and cropped image
             straightened.save(output_path)
-            print(f"Saved straightened and cropped image: {output_path}")
+            print(f"Saved straightened and cropped image: {output_path}".encode("ascii", errors="replace").decode())
         else:
             print(f"No contour found after rotation in {image_path}")
     else:
@@ -76,6 +78,11 @@ def process_directory(input_dir, output_dir):
         straighten_and_crop_card(str(img_path), str(output_file))
 
 if __name__ == "__main__":
-    input_directory = "C:/Users/tompi/projects/floptician/resources/masks/cards"
-    output_directory = "C:/Users/tompi/projects/floptician/resources/masks/straight_cards"
+    parser = argparse.ArgumentParser(description="Straighten and crop card images.")
+    parser.add_argument("input_dir", nargs="?", default=None, help="Path to input directory containing PNG images.")
+    parser.add_argument("-o", "--output_dir", default=None, help="Path to output directory. Defaults to <input_dir>_straight.")
+    args = parser.parse_args()
+
+    input_directory = Path(args.input_dir) if args.input_dir else resources_path("masks", "cards")
+    output_directory = Path(args.output_dir) if args.output_dir else Path(str(input_directory) + "_straight")
     process_directory(input_directory, output_directory)

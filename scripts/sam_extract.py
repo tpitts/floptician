@@ -3,22 +3,26 @@ import cv2
 import numpy as np
 from ultralytics import SAM
 import logging
+import argparse
 from pathlib import Path
 from datetime import datetime
+from _common import resources_path
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def process_images(input_folder):
+def process_images(input_folder, output_folder=None):
     try:
         # Create a SAM2 model
-        model_path = "C:/Users/tompi/projects/floptician/resources/models/sam2_b.pt"
-        model = SAM(model_path)
+        model_path = resources_path("models", "sam2_b.pt")
+        model = SAM(str(model_path))
         logging.info(f"Loaded SAM2 model: {model_path}")
 
         # Create output folder with timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_folder = Path(f"C:/Users/tompi/projects/floptician/resources/masks/{timestamp}")
+        if output_folder is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_folder = resources_path("masks", timestamp)
+        output_folder = Path(output_folder)
         output_folder.mkdir(parents=True, exist_ok=True)
         logging.info(f"Created output folder: {output_folder}")
 
@@ -91,8 +95,14 @@ def process_images(input_folder):
         logging.error(f"An error occurred: {e}")
 
 def main():
-    input_folder = "C:/Users/tompi/projects/floptician/resources/video/extract"
-    process_images(input_folder)
+    parser = argparse.ArgumentParser(description="Extract segments from images using SAM 2.")
+    parser.add_argument("input_dir", nargs="?", default=None, help="Path to the input directory containing images.")
+    parser.add_argument("-o", "--output_dir", default=None, help="Path to the output directory. Defaults to resources/masks/<timestamp>.")
+    args = parser.parse_args()
+
+    input_folder = Path(args.input_dir) if args.input_dir else resources_path("video", "extract")
+    output_folder = Path(args.output_dir) if args.output_dir else None
+    process_images(input_folder, output_folder)
 
 if __name__ == '__main__':
     main()

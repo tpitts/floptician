@@ -5,6 +5,7 @@ from datetime import datetime
 import argparse
 import numpy as np
 import logging
+from _common import resources_path
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,8 +16,8 @@ def save_detected_objects(image_path):
         source = image_path
 
         # Create a FastSAM model
-        model_path = "C:/Users/tompi/projects/floptician/resources/models/FastSAM-x.pt"
-        model = FastSAM(model_path)
+        model_path = resources_path("models", "FastSAM-x.pt")
+        model = FastSAM(str(model_path))
         logging.info(f"Loaded FastSAM model: {model_path}")
 
         # Run inference on the image
@@ -28,7 +29,7 @@ def save_detected_objects(image_path):
 
         # Get the current timestamp for unique folder naming
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_folder = f'C:/Users/tompi/projects/floptician/resources/masks/{timestamp}'
+        output_folder = resources_path("masks", timestamp)
 
         # Create the output folder if it doesn't exist
         os.makedirs(output_folder, exist_ok=True)

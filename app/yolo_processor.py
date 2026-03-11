@@ -5,7 +5,6 @@ import cv2
 import numpy as np
 import platform
 from ultralytics import YOLO
-import coremltools as ct
 from PIL import Image
 from typing import Dict, List, Any
 
@@ -53,6 +52,13 @@ class YOLOProcessor:
         """
         Load the Core ML model.
         """
+        try:
+            import coremltools as ct
+        except ImportError as e:
+            raise ImportError(
+                "coremltools is required to use .mlpackage models."
+            ) from e
+
         try:
             model = ct.models.MLModel(model_path)
             logger.info(f"Successfully loaded Core ML model from {model_path}")

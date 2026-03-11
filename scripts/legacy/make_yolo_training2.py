@@ -9,30 +9,33 @@ import shutil
 import yaml
 from datetime import datetime
 from collections import namedtuple
+from _common import output_path, resources_path
 
 # Constants
-INPUT_SIZE = (1280, 720)
-LETTERBOX_SIZE = (1280, 720)
 OUTPUT_SIZE = (1280, 720)
-CARD_SIZES = [63, 91, 120]  # Small, Medium, Large
-BLUR_FACTORS = [0.0, 0.33, 0.67, 1.0]  # No blur, Light, Medium, Heavy
-NUM_IMAGES = 3000
+CARD_WIDTH_RANGE = (80, 120)
+NUM_IMAGES = 400
 MAX_CARD_BACKS = 13
 CARDS_PER_IMAGE = 13
-MAX_OVERLAP = 0.03
-TRAIN_SPLIT = 0.95
+MAX_OVERLAP = 0.05
+TRAIN_SPLIT = 0.9
+
+BLUR_CARDS = True
+BLUR_MIN = 0.1
+BLUR_MAX = 1.5
+
 
 # Define a named tuple to hold card and rotation information
 CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
 
 # Input Paths
-BACKGROUND_DIR = Path(r"..\resources\background")
-DECKS_DIR = Path(r"..\resources\decks")
+BACKGROUND_DIR = resources_path("background")
+DECKS_DIR = resources_path("decks")
 
 # Function to create a unique output directory
 def create_unique_output_dir():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_dir = Path(r"..\output") / f"run_{timestamp}"
+    unique_dir = output_path() / f"run_{timestamp}"
     unique_dir.mkdir(parents=True, exist_ok=True)
     return unique_dir
 
@@ -151,6 +154,13 @@ def rotate_image(image, angle):
     
     return cropped
 
+
+def apply_random_blur(image):
+    if not BLUR_CARDS:
+        return image
+    blur_amount = random.uniform(BLUR_MIN, BLUR_MAX)
+    return cv2.GaussianBlur(image, (5, 5), blur_amount)
+
 def random_position(image_size, card_size):
     return (
         random.randint(0, image_size[0] - card_size[0]),
@@ -240,6 +250,7 @@ def check_overlap(box1, box2, max_overlap=0.2):
     
     return max(overlap_ratio1, overlap_ratio2) > max_overlap
 
+
 def generate_rotation_sequence(num_cards, total_images, cards_per_image):
     """Generate a sequence of rotations with 0 and 180 degrees, plus random variations."""
     total_card_instances = total_images * cards_per_image
@@ -278,36 +289,6 @@ def prepare_card_sequence_with_rotations(all_decks, total_images, cards_per_imag
     
     return card_rotation_pairs
 
-def letterbox_image(image, target_size):
-    """Resize image with unchanged aspect ratio using padding"""
-    ih, iw = image.shape[:2]
-    w, h = target_size
-    scale = min(w/iw, h/ih)
-    nw = int(iw*scale)
-    nh = int(ih*scale)
-
-    # Determine the number of channels in the input image
-    if image.shape[2] == 4:  # RGBA
-        new_image = np.zeros((h,w,4), np.uint8)
-        new_image[:,:,3] = 255  # Set alpha channel to fully opaque
-    else:  # RGB
-        new_image = np.zeros((h,w,3), np.uint8)
-    
-    new_image[:,:,:3] = 128  # fill with grey color
-
-    image_resized = cv2.resize(image, (nw,nh))
-
-    # Center the resized image in the new image
-    top, bottom = (h-nh)//2, h-(h-nh)//2
-    left, right = (w-nw)//2, w-(w-nw)//2
-    
-    if image.shape[2] == 4:  # RGBA
-        new_image[top:bottom, left:right, :] = image_resized
-    else:  # RGB
-        new_image[top:bottom, left:right, :3] = image_resized
-
-    return new_image
-
 def generate_yolo_annotation(card_name, bounding_box, image_size):
     class_id = CARD_CLASSES.index(card_name)
     x, y, w, h = bounding_box
@@ -317,69 +298,36 @@ def generate_yolo_annotation(card_name, bounding_box, image_size):
     height = h / image_size[1]
     return f"{class_id} {x_center} {y_center} {width} {height}"
 
-
-def apply_blur(image, blur_factor):
-    """
-    Apply a combined Gaussian and defocus blur to the image.
-    
-    Parameters:
-    - image: The input image to be blurred (numpy array).
-    - blur_factor: A float representing the intensity of the blur. 
-                   0.0 for no blur, higher values for stronger blur.
-
-    Returns:
-    - Blurred image.
-    """
-    # Apply Gaussian blur
-    if blur_factor > 0.0:
-        image_blurred = cv2.GaussianBlur(image, (5, 5), blur_factor)
-    else:
-        image_blurred = image  # No blur applied if blur_factor is 0
-
-    # Determine defocus kernel size based on blur factor
-    if blur_factor > 0.0:
-        kernel_size = int(blur_factor / 3)  # Scale kernel size with blur factor
-        kernel_size = max(5, kernel_size)  # Ensure minimum size for defocus blur
-        if kernel_size % 2 == 0:
-            kernel_size += 1  # Kernel size must be odd
-
-        # Create a circular defocus kernel
-        kernel = np.zeros((kernel_size, kernel_size), np.float32)
-        cv2.circle(kernel, (kernel_size // 2, kernel_size // 2), kernel_size // 2, 1, -1)
-        kernel /= kernel.sum()
-
-        # Apply defocus blur
-        image_blurred = cv2.filter2D(image_blurred, -1, kernel)
-
-    return image_blurred
-def generate_image(backgrounds, cards_subset, card_backs, output_path, label_path, bbox_image_path, index, card_size, blur_factor):
+def generate_image(backgrounds, cards_subset, card_backs, output_path, label_path, bbox_image_path, index):
     background = random.choice(backgrounds).copy()
-    background = cv2.resize(background, INPUT_SIZE)
+    background = cv2.resize(background, OUTPUT_SIZE)
+    
+    card_width = random.randint(*CARD_WIDTH_RANGE)
     
     # Place card backs if available
     if card_backs:
         num_card_backs = random.randint(1, MAX_CARD_BACKS)
         for _ in range(num_card_backs):
-            card_back = resize_image(random.choice(card_backs), card_size)
+            card_back = resize_image(random.choice(card_backs), card_width)
             angle = random.uniform(0, 360)
             card_back_rotated = rotate_image(card_back, angle)
-            position = random_position(INPUT_SIZE, card_back_rotated.shape[:2])
+            position = random_position(OUTPUT_SIZE, card_back_rotated.shape[:2])
             background = overlay_image(background, card_back_rotated, position)
     
     # Place cards and create bounding boxes
     bounding_boxes = []
     
     for card_with_rotation in cards_subset:
-        card_resized = resize_image(card_with_rotation.card['image'], card_size)
+        card_resized = resize_image(card_with_rotation.card['image'], card_width)
         card_rotated = rotate_image(card_resized, card_with_rotation.rotation)
         
-        # Apply specified blur to the card
-        card_blurred = apply_blur(card_rotated, blur_factor) 
+        # Apply random blur to the card
+        card_blurred = apply_random_blur(card_rotated)
         
         # Try to place the card without excessive overlap
         max_attempts = 100
         for _ in range(max_attempts):
-            position = random_position(INPUT_SIZE, card_blurred.shape[:2])
+            position = random_position(OUTPUT_SIZE, card_blurred.shape[:2])
             temp_bg = background.copy()
             temp_bg = overlay_image(temp_bg, card_blurred, position)
             
@@ -395,40 +343,20 @@ def generate_image(backgrounds, cards_subset, card_backs, output_path, label_pat
         else:
             print(f"Warning: Could not place card {card_with_rotation.card['name']} without excessive overlap after {max_attempts} attempts.")
     
-    # Apply letterboxing
-    letterboxed_image = letterbox_image(background, LETTERBOX_SIZE)
-    
-    # Resize to final output size
-    final_image = cv2.resize(letterboxed_image, OUTPUT_SIZE)
-    
     # Save clean image
-    cv2.imwrite(str(output_path), final_image)
-    
-    # Adjust bounding boxes for letterboxing and resizing
-    scale_x = OUTPUT_SIZE[0] / LETTERBOX_SIZE[0]
-    scale_y = OUTPUT_SIZE[1] / LETTERBOX_SIZE[1]
-    offset_x = (LETTERBOX_SIZE[0] - INPUT_SIZE[0]) / 2 * scale_x
-    offset_y = (LETTERBOX_SIZE[1] - INPUT_SIZE[1]) / 2 * scale_y
-    
-    adjusted_bounding_boxes = []
-    for card_name, (x, y, w, h) in bounding_boxes:
-        new_x = x * scale_x + offset_x
-        new_y = y * scale_y + offset_y
-        new_w = w * scale_x
-        new_h = h * scale_y
-        adjusted_bounding_boxes.append((card_name, (new_x, new_y, new_w, new_h)))
+    cv2.imwrite(str(output_path), cv2.cvtColor(background, cv2.COLOR_BGRA2BGR))
     
     # Generate YOLO annotation
     with open(label_path, 'w') as f:
-        for card_name, bbox in adjusted_bounding_boxes:
+        for card_name, bbox in bounding_boxes:
             yolo_annotation = generate_yolo_annotation(card_name, bbox, OUTPUT_SIZE)
             f.write(yolo_annotation + '\n')
     
     # Draw bounding boxes and save
-    img_pil = Image.fromarray(cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB))
+    img_pil = Image.fromarray(cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     draw = ImageDraw.Draw(img_pil)
     
-    for name, (x, y, w, h) in adjusted_bounding_boxes:
+    for name, (x, y, w, h) in bounding_boxes:
         draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
         draw.text((x, y-15), name, fill="red")
     
@@ -472,45 +400,30 @@ def main():
     if not all_card_backs:
         print("Warning: No card back images found in any deck. Proceeding without card backs.")
     
-    total_combinations = len(CARD_SIZES) * len(BLUR_FACTORS)
-    images_per_combination = NUM_IMAGES // total_combinations
+    card_sequence = prepare_card_sequence_with_rotations(all_decks, NUM_IMAGES, CARDS_PER_IMAGE)
     
-    # Calculate the number of validation images
-    num_val_images = int(NUM_IMAGES * (1 - TRAIN_SPLIT))
-    
-    # Generate all image metadata first
-    all_images = []
-    for card_size in CARD_SIZES:
-        for blur_factor in BLUR_FACTORS:
-            print(f"Preparing metadata for card size: {card_size}, blur factor: {blur_factor}")
-            
-            card_sequence = prepare_card_sequence_with_rotations(all_decks, images_per_combination, CARDS_PER_IMAGE)
-            
-            for i in range(images_per_combination):
-                all_images.append((card_size, blur_factor, card_sequence[i*CARDS_PER_IMAGE:(i+1)*CARDS_PER_IMAGE]))
-
-    # Randomly select validation images
-    val_indices = set(random.sample(range(len(all_images)), num_val_images))
-
-    # Generate images
-    for image_counter, (card_size, blur_factor, cards_for_image) in enumerate(all_images):
-        image_name = f"image_{image_counter:04d}.png"
-        label_name = f"image_{image_counter:04d}.txt"
-        bbox_image_name = f"bbox_image_{image_counter:04d}.png"
+    for i in range(NUM_IMAGES):
+        image_name = f"image_{i:04d}.png"
+        label_name = f"image_{i:04d}.txt"
+        bbox_image_name = f"bbox_image_{i:04d}.png"
         
-        if image_counter in val_indices:
-            output_path = VAL_IMAGES_DIR / image_name
-            label_path = VAL_LABELS_DIR / label_name
-        else:
-            output_path = TRAIN_IMAGES_DIR / image_name
-            label_path = TRAIN_LABELS_DIR / label_name
-        
+        output_path = TRAIN_IMAGES_DIR / image_name if i < NUM_IMAGES * TRAIN_SPLIT else VAL_IMAGES_DIR / image_name
+        label_path = TRAIN_LABELS_DIR / label_name if i < NUM_IMAGES * TRAIN_SPLIT else VAL_LABELS_DIR / label_name
         bbox_image_path = BBOX_IMAGES_DIR / bbox_image_name
         
-        generate_image(backgrounds, cards_for_image, all_card_backs, output_path, label_path, bbox_image_path, image_counter, card_size, blur_factor)
-        print(f"Generated image {image_counter+1}/{NUM_IMAGES}")
-
+        # Get the next batch of cards from the sequence
+        start_index = i * CARDS_PER_IMAGE
+        end_index = start_index + CARDS_PER_IMAGE
+        cards_for_image = card_sequence[start_index:end_index]
+        
+        generate_image(backgrounds, cards_for_image, all_card_backs, output_path, label_path, bbox_image_path, i)
+        print(f"Generated image {i+1}/{NUM_IMAGES}")
+    
     # Create data.yaml
+    CARD_CLASSES = ['2c', '2d', '2h', '2s', '3c', '3d', '3h', '3s', '4c', '4d', '4h', '4s', '5c', '5d', '5h', '5s', 
+                    '6c', '6d', '6h', '6s', '7c', '7d', '7h', '7s', '8c', '8d', '8h', '8s', '9c', '9d', '9h', '9s', 
+                    'Ac', 'Ad', 'Ah', 'As', 'Jc', 'Jd', 'Jh', 'Js', 'Kc', 'Kd', 'Kh', 'Ks', 'Qc', 'Qd', 'Qh', 'Qs', 
+                    'Tc', 'Td', 'Th', 'Ts']
     create_data_yaml(DATASET_DIR / 'data.yaml', CARD_CLASSES)
 
 if __name__ == "__main__":

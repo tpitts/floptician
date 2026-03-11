@@ -6,8 +6,11 @@ import cv2
 import numpy as np
 import yaml
 from ultralytics import YOLO
+from _common import models_path, output_path, resources_path, repo_path
 
-def create_unique_output_dir(base_dir='../output'):
+def create_unique_output_dir(base_dir=None):
+    if base_dir is None:
+        base_dir = output_path()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_dir = Path(base_dir) / f'bad_detections_{timestamp}'
     unique_dir.mkdir(parents=True, exist_ok=True)
@@ -25,8 +28,8 @@ def draw_boxes(img, boxes, color, class_names, label_prefix=''):
 
 def main():
     # Paths to your model and data
-    model_path = r'C:\Users\tompi\projects\moneta\runs\detect\train43\weights\best.pt'
-    data_yaml = r'C:\Users\tompi\projects\floptician\resources\truth\test.yaml'
+    model_path = models_path('best43.pt')
+    data_yaml = resources_path('training', '20260310_184925', 'dataset', 'data.yaml')
 
     # Create output directory
     output_dir = create_unique_output_dir()
@@ -35,7 +38,7 @@ def main():
     # Load the YOLO model
     print("Loading YOLO model...")
     try:
-        model = YOLO(model_path)
+        model = YOLO(str(model_path))
     except Exception as e:
         print(f"Error loading model: {e}")
         sys.exit(1)

@@ -1,31 +1,16 @@
-# Install the GPU version of PyTorch if you have an NVIDIA GPU:
-# For CUDA 11.8:
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-
-# Basic utilities
+# Base runtime dependencies
 numpy
 opencv-python
 Pillow
 pyyaml
-
-# Logging
-logging
-
-# HTTP and WebSocket servers
 websocket-server
 obsws-python
-
-# YOLO model from ultralytics
 ultralytics
-
-# other
 aioconsole
+imageio-ffmpeg
 
-# Windows-specific dependencies
-# Run these commands manually on Windows
-# pip install msvcrt
-# pip install pygrabber
+# Windows camera support
+pygrabber; platform_system == "Windows"
 
-# Mac-Specific dependencies
-pyobjc
-pyobjc-framework-AVFoundation
+# Optional, not installed by default:
+# coremltools  # Required only for .mlpackage / CoreML workflows

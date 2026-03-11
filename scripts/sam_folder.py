@@ -5,6 +5,7 @@ from ultralytics import SAM
 import logging
 from pathlib import Path
 import argparse
+from _common import resources_path
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -12,8 +13,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def process_images(input_folder):
     try:
         # Create a SAM2 model
-        model_path = "C:/Users/tompi/projects/floptician/resources/models/sam2_b.pt"
-        model = SAM(model_path)
+        model_path = resources_path("models", "sam2_b.pt")
+        model = SAM(str(model_path))
         logging.info(f"Loaded SAM2 model: {model_path}")
 
         # Create output folder inside the input directory

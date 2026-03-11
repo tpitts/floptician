@@ -26,9 +26,6 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual environment
-flopenv/
-
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -93,7 +90,6 @@ env.bak/
 venv.bak/
 flopenv/
 oldpyvenv/
-resources/
 
 # Spyder project settings
 .spyderproject
@@ -113,12 +109,28 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Output directory
+# Project-local generated content and config
 output/
-
 config.yaml
+resources/**
+!resources/README.md
 
-yolov8m.pt 
-yolov8n.pt 
-yolov8l.pt 
-yolov8s.pt 
+# YOLO training runs
+runs/
+
+# Stray model files outside models/
+scripts/*.pt
+
+# Model weights kept local at repo root
+yolov8m.pt
+yolov8n.pt
+yolov8l.pt
+yolov8s.pt
+
+# Editor settings
+.vscode/
+.idea/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

@@ -1,10 +1,11 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from _common import models_path
 
 # Load the YOLO model
 print("Loading YOLO model...")
-model = YOLO("..\\models\\best.pt")
+model = YOLO(str(models_path("best.pt")))
 print("YOLO model loaded successfully.")
 
 def detect_and_create_overlay(frame):

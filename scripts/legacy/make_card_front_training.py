@@ -5,25 +5,57 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 from pathlib import Path
+import shutil
+import yaml
+from datetime import datetime
+from collections import namedtuple
+from _common import output_path, resources_path
 
 # Constants
 OUTPUT_SIZE = (1280, 720)
 CARD_WIDTH_RANGE = (80, 120)
-NUM_IMAGES = 1000
-MAX_CARD_BACKS = 12
-CARDS_PER_IMAGE = 12
+NUM_IMAGES = 420
+MAX_CARD_BACKS = 17
+CARDS_PER_IMAGE = 13
 MAX_OVERLAP = 0.2
+TRAIN_SPLIT = 0.9
+BLUR_CARDS = True
+BLUR_MIN = 0.1
+BLUR_MAX = 1.5
 
-# Paths
-BACKGROUND_DIR = Path(r"..\resources\background")
-DECKS_DIR = Path(r"..\resources\decks")
-OUTPUT_DIR = Path(r"..\output")
-OUTPUT_DIR_BOXES = OUTPUT_DIR / "with_boxes"
-OUTPUT_DIR_CLEAN = OUTPUT_DIR / "clean"
+# Define a named tuple to hold card and rotation information
+CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
+
+# Input Paths
+BACKGROUND_DIR = resources_path("background")
+DECKS_DIR = resources_path("decks")
+
+# Function to create a unique output directory
+def create_unique_output_dir():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_dir = output_path() / f"run_{timestamp}"
+    unique_dir.mkdir(parents=True, exist_ok=True)
+    return unique_dir
+
+# Create unique output directory
+OUTPUT_DIR = create_unique_output_dir()
+
+# Output Paths
+DATASET_DIR = OUTPUT_DIR / "dataset"
+IMAGES_DIR = DATASET_DIR / "images"
+LABELS_DIR = DATASET_DIR / "labels"
+TRAIN_IMAGES_DIR = IMAGES_DIR / "train"
+VAL_IMAGES_DIR = IMAGES_DIR / "val"
+TRAIN_LABELS_DIR = LABELS_DIR / "train"
+VAL_LABELS_DIR = LABELS_DIR / "val"
+BBOX_IMAGES_DIR = OUTPUT_DIR / "bbox_images"
 
 # Ensure output directories exist
-OUTPUT_DIR_BOXES.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR_CLEAN.mkdir(parents=True, exist_ok=True)
+for dir in [TRAIN_IMAGES_DIR, VAL_IMAGES_DIR, TRAIN_LABELS_DIR, VAL_LABELS_DIR, BBOX_IMAGES_DIR]:
+    dir.mkdir(parents=True, exist_ok=True)
+
+# Define CARD_CLASSES globally
+CARD_CLASSES = ['card_front']
 
 def load_images(directory):
     images = []
@@ -117,6 +149,13 @@ def rotate_image(image, angle):
     
     return cropped
 
+
+def apply_random_blur(image):
+    if not BLUR_CARDS:
+        return image
+    blur_amount = random.uniform(BLUR_MIN, BLUR_MAX)
+    return cv2.GaussianBlur(image, (5, 5), blur_amount)
+
 def random_position(image_size, card_size):
     return (
         random.randint(0, image_size[0] - card_size[0]),
@@ -206,28 +245,60 @@ def check_overlap(box1, box2, max_overlap=0.2):
     
     return max(overlap_ratio1, overlap_ratio2) > max_overlap
 
-def prepare_card_sequence(all_decks, total_images, cards_per_image):
-    # Calculate total cards needed
+def generate_rotation_sequence(num_cards, total_images, cards_per_image):
+    """Generate a sequence of rotations including the base sequence and additional rotations."""
+    base_sequence = [0, 2, 180, 182]
+    
+    total_card_instances = total_images * cards_per_image
+    min_rotations_per_card = math.ceil(total_card_instances / num_cards / 2)  # Ensure at least 2 appearances
+    
+    num_additional_rotations = max(0, min_rotations_per_card - len(base_sequence))
+    
+    if num_additional_rotations > 0:
+        step = 360 / num_additional_rotations
+        additional_rotations = [round(i * step) % 360 for i in range(num_additional_rotations)]
+    else:
+        additional_rotations = []
+    
+    rotations = base_sequence + additional_rotations
+    return rotations  # Keeping all duplicates
+
+def prepare_card_sequence_with_rotations(all_decks, total_images, cards_per_image):
+    """Prepare a sequence of cards with assigned rotations, ensuring each card has every rotation at least twice."""
+    num_cards = sum(len(deck) for deck in all_decks)
+    rotations = generate_rotation_sequence(num_cards, total_images, cards_per_image)
+    
+    # Create all possible card-rotation pairs
+    all_card_rotation_pairs = []
+    for deck in all_decks:
+        for card in deck:
+            for rotation in rotations:
+                all_card_rotation_pairs.append(CardWithRotation(card, rotation))
+    
+    # Calculate how many times we need to repeat the sequence
     total_cards_needed = total_images * cards_per_image
-
-    # Create a list of all unique cards
-    unique_cards = [card for deck in all_decks for card in deck]
-
-    # Calculate how many times each card should appear
-    repeats = math.ceil(total_cards_needed / len(unique_cards))
-
-    # Create the full sequence of cards
-    card_sequence = unique_cards * repeats
-
+    repeats = math.ceil(total_cards_needed / len(all_card_rotation_pairs))
+    
+    # Create the full sequence by repeating the pairs
+    card_sequence = all_card_rotation_pairs * repeats
+    
     # Cut off any excess cards
     card_sequence = card_sequence[:total_cards_needed]
-
+    
     # Shuffle the sequence
     random.shuffle(card_sequence)
-
+    
     return card_sequence
 
-def generate_image(backgrounds, cards_subset, card_backs, output_path_boxes, output_path_clean, index):
+def generate_yolo_annotation(bounding_box, image_size):
+    x, y, w, h = bounding_box
+    x_center = (x + w / 2) / image_size[0]
+    y_center = (y + h / 2) / image_size[1]
+    width = w / image_size[0]
+    height = h / image_size[1]
+    return f"0 {x_center} {y_center} {width} {height}"  # 0 is the class ID for 'card_front'
+
+def generate_image(backgrounds, cards_subset, card_backs, output_path, label_path, bbox_image_path, index):
     background = random.choice(backgrounds).copy()
     background = cv2.resize(background, OUTPUT_SIZE)
     
@@ -246,42 +317,60 @@ def generate_image(backgrounds, cards_subset, card_backs, output_path_boxes, out
     # Place cards and create bounding boxes
     bounding_boxes = []
     
-    for card in cards_subset:
-        card_resized = resize_image(card['image'], card_width)
-        angle = random.uniform(0, 360)
-        card_rotated = rotate_image(card_resized, angle)
+    for card_with_rotation in cards_subset:
+        card_resized = resize_image(card_with_rotation.card['image'], card_width)
+        card_rotated = rotate_image(card_resized, card_with_rotation.rotation)
+        
+        # Apply random blur to the card
+        card_blurred = apply_random_blur(card_rotated)
         
         # Try to place the card without excessive overlap
         max_attempts = 100
         for _ in range(max_attempts):
-            position = random_position(OUTPUT_SIZE, card_rotated.shape[:2])
+            position = random_position(OUTPUT_SIZE, card_blurred.shape[:2])
             temp_bg = background.copy()
-            temp_bg = overlay_image(temp_bg, card_rotated, position)
+            temp_bg = overlay_image(temp_bg, card_blurred, position)
             
-            bounding_box = find_card_bounding_box(temp_bg, card_rotated, position)
+            bounding_box = find_card_bounding_box(temp_bg, card_blurred, position)
             if bounding_box is None:
                 continue
             
-            overlaps = [check_overlap(bounding_box, existing_box) for _, existing_box in bounding_boxes]
+            overlaps = [check_overlap(bounding_box, existing_box) for existing_box in bounding_boxes]
             if sum(overlaps) <= 1 and (not overlaps or max(overlaps) <= MAX_OVERLAP):
                 background = temp_bg
-                bounding_boxes.append((card['name'], bounding_box))
+                bounding_boxes.append(bounding_box)
                 break
         else:
-            print(f"Warning: Could not place card {card['name']} without excessive overlap after {max_attempts} attempts.")
+            print(f"Warning: Could not place a card without excessive overlap after {max_attempts} attempts.")
     
     # Save clean image
-    cv2.imwrite(str(output_path_clean), cv2.cvtColor(background, cv2.COLOR_BGRA2BGR))
+    cv2.imwrite(str(output_path), cv2.cvtColor(background, cv2.COLOR_BGRA2BGR))
+    
+    # Generate YOLO annotation
+    with open(label_path, 'w') as f:
+        for bbox in bounding_boxes:
+            yolo_annotation = generate_yolo_annotation(bbox, OUTPUT_SIZE)
+            f.write(yolo_annotation + '\n')
     
     # Draw bounding boxes and save
     img_pil = Image.fromarray(cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     draw = ImageDraw.Draw(img_pil)
     
-    for name, (x, y, w, h) in bounding_boxes:
+    for x, y, w, h in bounding_boxes:
         draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
-        draw.text((x, y-15), name, fill="red")
+        draw.text((x, y-15), "card_front", fill="red")
     
-    img_pil.save(output_path_boxes)
+    img_pil.save(bbox_image_path)
+
+def create_data_yaml(output_path, class_names):
+    data = {
+        'train': '../dataset/images/train',
+        'val': '../dataset/images/val',
+        'nc': len(class_names),
+        'names': class_names
+    }
+    with open(output_path, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False)
 
 def main():
     backgrounds = load_images(BACKGROUND_DIR)
@@ -303,17 +392,6 @@ def main():
                     # Load card backs for this deck
                     deck_backs = load_card_backs(cards_dir)
                     all_card_backs.extend(deck_backs)
-            
-            # Check for additional cards in the deck directory (like bicycle/cards)
-            additional_cards_dir = deck_dir / "cards"
-            if additional_cards_dir.exists() and additional_cards_dir != cards_dir:
-                additional_deck_cards = load_cards(additional_cards_dir)
-                if additional_deck_cards:
-                    all_decks.append(additional_deck_cards)
-                    
-                    # Load card backs for this additional deck
-                    additional_deck_backs = load_card_backs(additional_cards_dir)
-                    all_card_backs.extend(additional_deck_backs)
     
     if not all_decks:
         print("Error: No card images found in any deck.")
@@ -322,19 +400,27 @@ def main():
     if not all_card_backs:
         print("Warning: No card back images found in any deck. Proceeding without card backs.")
     
-    card_sequence = prepare_card_sequence(all_decks, NUM_IMAGES, CARDS_PER_IMAGE)
+    card_sequence = prepare_card_sequence_with_rotations(all_decks, NUM_IMAGES, CARDS_PER_IMAGE)
     
     for i in range(NUM_IMAGES):
-        output_path_boxes = OUTPUT_DIR_BOXES / f"image_{i:04d}_boxes.png"
-        output_path_clean = OUTPUT_DIR_CLEAN / f"image_{i:04d}.png"
+        image_name = f"image_{i:04d}.png"
+        label_name = f"image_{i:04d}.txt"
+        bbox_image_name = f"bbox_image_{i:04d}.png"
+        
+        output_path = TRAIN_IMAGES_DIR / image_name if i < NUM_IMAGES * TRAIN_SPLIT else VAL_IMAGES_DIR / image_name
+        label_path = TRAIN_LABELS_DIR / label_name if i < NUM_IMAGES * TRAIN_SPLIT else VAL_LABELS_DIR / label_name
+        bbox_image_path = BBOX_IMAGES_DIR / bbox_image_name
         
         # Get the next batch of cards from the sequence
         start_index = i * CARDS_PER_IMAGE
         end_index = start_index + CARDS_PER_IMAGE
         cards_for_image = card_sequence[start_index:end_index]
         
-        generate_image(backgrounds, cards_for_image, all_card_backs, output_path_boxes, output_path_clean, i)
+        generate_image(backgrounds, cards_for_image, all_card_backs, output_path, label_path, bbox_image_path, i)
         print(f"Generated image {i+1}/{NUM_IMAGES}")
+    
+    # Create data.yaml
+    create_data_yaml(DATASET_DIR / 'data.yaml', CARD_CLASSES)
 
 if __name__ == "__main__":
     main()

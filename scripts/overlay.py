@@ -10,17 +10,10 @@ import base64
 import numpy as np
 import cv2
 from PIL import Image
-import yaml
 from ultralytics import YOLO
 
-from obs_client import OBSClient
-
-# Configuration
-CONFIG_FILE = 'config.yaml'
-
-def load_config():
-    with open(CONFIG_FILE, 'r') as file:
-        return yaml.safe_load(file)
+from app.config_utils import load_config
+from app.obs_client import OBSClient
 
 config = load_config()
 

@@ -2,14 +2,15 @@ import os
 import cv2
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+from _common import resources_path
 
 # Define input and output directories
-INPUT_IMAGES_DIR = Path(r"C:\Users\tompi\projects\floptician\resources\truth\images\test")
-INPUT_LABELS_DIR = Path(r"C:\Users\tompi\projects\floptician\resources\truth\labels\test")
+INPUT_IMAGES_DIR = resources_path("truth", "images", "test")
+INPUT_LABELS_DIR = resources_path("truth", "labels", "test")
 
-OUTPUT_IMAGES_DIR = Path(r"C:\Users\tompi\projects\floptician\resources\truth\rotated_images\test")
-OUTPUT_LABELS_DIR = Path(r"C:\Users\tompi\projects\floptician\resources\truth\rotated_labels\test")
-VISUALIZATIONS_DIR = Path(r"C:\Users\tompi\projects\floptician\resources\truth\visualizations\test")
+OUTPUT_IMAGES_DIR = resources_path("truth", "rotated_images", "test")
+OUTPUT_LABELS_DIR = resources_path("truth", "rotated_labels", "test")
+VISUALIZATIONS_DIR = resources_path("truth", "visualizations", "test")
 
 # Create output directories if they don't exist
 for directory in [OUTPUT_IMAGES_DIR, OUTPUT_LABELS_DIR, VISUALIZATIONS_DIR]:

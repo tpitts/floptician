@@ -9,30 +9,33 @@ import shutil
 import yaml
 from datetime import datetime
 from collections import namedtuple
+from _common import output_path, resources_path
 
 # Constants
 OUTPUT_SIZE = (1280, 720)
 CARD_WIDTH_RANGE = (80, 120)
-NUM_IMAGES = 420
-MAX_CARD_BACKS = 17
+NUM_IMAGES = 1212
+MAX_CARD_BACKS = 13
 CARDS_PER_IMAGE = 13
-MAX_OVERLAP = 0.2
+MAX_OVERLAP = 0.15
 TRAIN_SPLIT = 0.9
+
 BLUR_CARDS = True
 BLUR_MIN = 0.1
 BLUR_MAX = 1.5
+
 
 # Define a named tuple to hold card and rotation information
 CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
 
 # Input Paths
-BACKGROUND_DIR = Path(r"..\resources\background")
-DECKS_DIR = Path(r"..\resources\decks")
+BACKGROUND_DIR = resources_path("background")
+DECKS_DIR = resources_path("decks")
 
 # Function to create a unique output directory
 def create_unique_output_dir():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_dir = Path(r"..\output") / f"run_{timestamp}"
+    unique_dir = output_path() / f"run_{timestamp}"
     unique_dir.mkdir(parents=True, exist_ok=True)
     return unique_dir
 
@@ -54,7 +57,10 @@ for dir in [TRAIN_IMAGES_DIR, VAL_IMAGES_DIR, TRAIN_LABELS_DIR, VAL_LABELS_DIR, 
     dir.mkdir(parents=True, exist_ok=True)
 
 # Define CARD_CLASSES globally
-CARD_CLASSES = ['card_front']
+CARD_CLASSES = ['2c', '2d', '2h', '2s', '3c', '3d', '3h', '3s', '4c', '4d', '4h', '4s', '5c', '5d', '5h', '5s', 
+                '6c', '6d', '6h', '6s', '7c', '7d', '7h', '7s', '8c', '8d', '8h', '8s', '9c', '9d', '9h', '9s', 
+                'Ac', 'Ad', 'Ah', 'As', 'Jc', 'Jd', 'Jh', 'Js', 'Kc', 'Kd', 'Kh', 'Ks', 'Qc', 'Qd', 'Qh', 'Qs', 
+                'Tc', 'Td', 'Th', 'Ts']
 
 def load_images(directory):
     images = []
@@ -244,23 +250,23 @@ def check_overlap(box1, box2, max_overlap=0.2):
     
     return max(overlap_ratio1, overlap_ratio2) > max_overlap
 
+
 def generate_rotation_sequence(num_cards, total_images, cards_per_image):
-    """Generate a sequence of rotations including the base sequence and additional rotations."""
-    base_sequence = [0, 2, 180, 182]
-    
+    """Generate a sequence of rotations with 0 and 180 degrees, plus random variations."""
     total_card_instances = total_images * cards_per_image
-    min_rotations_per_card = math.ceil(total_card_instances / num_cards / 2)  # Ensure at least 2 appearances
     
-    num_additional_rotations = max(0, min_rotations_per_card - len(base_sequence))
+    # Create a list of base rotations (0 and 180 degrees)
+    base_rotations = [0, 180]
     
-    if num_additional_rotations > 0:
-        step = 360 / num_additional_rotations
-        additional_rotations = [round(i * step) % 360 for i in range(num_additional_rotations)]
-    else:
-        additional_rotations = []
+    # Generate the sequence of rotations
+    rotations = []
+    for _ in range(total_card_instances):
+        base_rotation = random.choice(base_rotations)
+        variation = random.uniform(-25, 25)
+        rotation = (base_rotation + variation) % 360
+        rotations.append(round(rotation, 2))  # Round to 2 decimal places for practicality
     
-    rotations = base_sequence + additional_rotations
-    return rotations  # Keeping all duplicates
+    return rotations
 
 def prepare_card_sequence_with_rotations(all_decks, total_images, cards_per_image):
     """Prepare a sequence of cards with assigned rotations, ensuring each card has every rotation at least twice."""
@@ -289,13 +295,14 @@ def prepare_card_sequence_with_rotations(all_decks, total_images, cards_per_imag
     
     return card_sequence
 
-def generate_yolo_annotation(bounding_box, image_size):
+def generate_yolo_annotation(card_name, bounding_box, image_size):
+    class_id = CARD_CLASSES.index(card_name)
     x, y, w, h = bounding_box
     x_center = (x + w / 2) / image_size[0]
     y_center = (y + h / 2) / image_size[1]
     width = w / image_size[0]
     height = h / image_size[1]
-    return f"0 {x_center} {y_center} {width} {height}"  # 0 is the class ID for 'card_front'
+    return f"{class_id} {x_center} {y_center} {width} {height}"
 
 def generate_image(backgrounds, cards_subset, card_backs, output_path, label_path, bbox_image_path, index):
     background = random.choice(backgrounds).copy()
@@ -334,30 +341,30 @@ def generate_image(backgrounds, cards_subset, card_backs, output_path, label_pat
             if bounding_box is None:
                 continue
             
-            overlaps = [check_overlap(bounding_box, existing_box) for existing_box in bounding_boxes]
+            overlaps = [check_overlap(bounding_box, existing_box) for _, existing_box in bounding_boxes]
             if sum(overlaps) <= 1 and (not overlaps or max(overlaps) <= MAX_OVERLAP):
                 background = temp_bg
-                bounding_boxes.append(bounding_box)
+                bounding_boxes.append((card_with_rotation.card['name'], bounding_box))
                 break
         else:
-            print(f"Warning: Could not place a card without excessive overlap after {max_attempts} attempts.")
+            print(f"Warning: Could not place card {card_with_rotation.card['name']} without excessive overlap after {max_attempts} attempts.")
     
     # Save clean image
     cv2.imwrite(str(output_path), cv2.cvtColor(background, cv2.COLOR_BGRA2BGR))
     
     # Generate YOLO annotation
     with open(label_path, 'w') as f:
-        for bbox in bounding_boxes:
-            yolo_annotation = generate_yolo_annotation(bbox, OUTPUT_SIZE)
+        for card_name, bbox in bounding_boxes:
+            yolo_annotation = generate_yolo_annotation(card_name, bbox, OUTPUT_SIZE)
             f.write(yolo_annotation + '\n')
     
     # Draw bounding boxes and save
     img_pil = Image.fromarray(cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     draw = ImageDraw.Draw(img_pil)
     
-    for x, y, w, h in bounding_boxes:
+    for name, (x, y, w, h) in bounding_boxes:
         draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
-        draw.text((x, y-15), "card_front", fill="red")
+        draw.text((x, y-15), name, fill="red")
     
     img_pil.save(bbox_image_path)
 
@@ -419,6 +426,10 @@ def main():
         print(f"Generated image {i+1}/{NUM_IMAGES}")
     
     # Create data.yaml
+    CARD_CLASSES = ['2c', '2d', '2h', '2s', '3c', '3d', '3h', '3s', '4c', '4d', '4h', '4s', '5c', '5d', '5h', '5s', 
+                    '6c', '6d', '6h', '6s', '7c', '7d', '7h', '7s', '8c', '8d', '8h', '8s', '9c', '9d', '9h', '9s', 
+                    'Ac', 'Ad', 'Ah', 'As', 'Jc', 'Jd', 'Jh', 'Js', 'Kc', 'Kd', 'Kh', 'Ks', 'Qc', 'Qd', 'Qh', 'Qs', 
+                    'Tc', 'Td', 'Th', 'Ts']
     create_data_yaml(DATASET_DIR / 'data.yaml', CARD_CLASSES)
 
 if __name__ == "__main__":

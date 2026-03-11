@@ -9,32 +9,34 @@ import shutil
 import yaml
 from datetime import datetime
 from collections import namedtuple
+from _common import output_path, resources_path
 
 # Constants
-OUTPUT_SIZE = (1280, 720)
+INPUT_SIZE = (1280, 720)
+LETTERBOX_SIZE = (1280, 1280)
+OUTPUT_SIZE = (640, 640)
 CARD_WIDTH_RANGE = (80, 120)
-NUM_IMAGES = 1212
+NUM_IMAGES = 2000
 MAX_CARD_BACKS = 13
 CARDS_PER_IMAGE = 13
-MAX_OVERLAP = 0.15
+MAX_OVERLAP = 0.03
 TRAIN_SPLIT = 0.9
 
 BLUR_CARDS = True
 BLUR_MIN = 0.1
 BLUR_MAX = 1.5
 
-
 # Define a named tuple to hold card and rotation information
 CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
 
 # Input Paths
-BACKGROUND_DIR = Path(r"..\resources\background")
-DECKS_DIR = Path(r"..\resources\decks")
+BACKGROUND_DIR = resources_path("background")
+DECKS_DIR = resources_path("decks")
 
 # Function to create a unique output directory
 def create_unique_output_dir():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_dir = Path(r"..\output") / f"run_{timestamp}"
+    unique_dir = output_path() / f"run_{timestamp}"
     unique_dir.mkdir(parents=True, exist_ok=True)
     return unique_dir
 
@@ -153,7 +155,6 @@ def rotate_image(image, angle):
     
     return cropped
 
-
 def apply_random_blur(image):
     if not BLUR_CARDS:
         return image
@@ -249,7 +250,6 @@ def check_overlap(box1, box2, max_overlap=0.2):
     
     return max(overlap_ratio1, overlap_ratio2) > max_overlap
 
-
 def generate_rotation_sequence(num_cards, total_images, cards_per_image):
     """Generate a sequence of rotations with 0 and 180 degrees, plus random variations."""
     total_card_instances = total_images * cards_per_image
@@ -261,38 +261,62 @@ def generate_rotation_sequence(num_cards, total_images, cards_per_image):
     rotations = []
     for _ in range(total_card_instances):
         base_rotation = random.choice(base_rotations)
-        variation = random.uniform(-25, 25)
+        variation = random.uniform(-20, 20)
         rotation = (base_rotation + variation) % 360
         rotations.append(round(rotation, 2))  # Round to 2 decimal places for practicality
     
     return rotations
 
 def prepare_card_sequence_with_rotations(all_decks, total_images, cards_per_image):
-    """Prepare a sequence of cards with assigned rotations, ensuring each card has every rotation at least twice."""
-    num_cards = sum(len(deck) for deck in all_decks)
-    rotations = generate_rotation_sequence(num_cards, total_images, cards_per_image)
-    
-    # Create all possible card-rotation pairs
-    all_card_rotation_pairs = []
-    for deck in all_decks:
-        for card in deck:
-            for rotation in rotations:
-                all_card_rotation_pairs.append(CardWithRotation(card, rotation))
-    
-    # Calculate how many times we need to repeat the sequence
     total_cards_needed = total_images * cards_per_image
-    repeats = math.ceil(total_cards_needed / len(all_card_rotation_pairs))
     
-    # Create the full sequence by repeating the pairs
-    card_sequence = all_card_rotation_pairs * repeats
+    # Flatten the deck list and create a list of all cards
+    all_cards = [card for deck in all_decks for card in deck]
     
-    # Cut off any excess cards
-    card_sequence = card_sequence[:total_cards_needed]
+    # Generate rotations
+    rotations = generate_rotation_sequence(len(all_cards), total_images, cards_per_image)
+    
+    # Create card-rotation pairs
+    card_rotation_pairs = []
+    for _ in range(total_cards_needed):
+        card = random.choice(all_cards)
+        rotation = random.choice(rotations)
+        card_rotation_pairs.append(CardWithRotation(card, rotation))
     
     # Shuffle the sequence
-    random.shuffle(card_sequence)
+    random.shuffle(card_rotation_pairs)
     
-    return card_sequence
+    return card_rotation_pairs
+
+def letterbox_image(image, target_size):
+    """Resize image with unchanged aspect ratio using padding"""
+    ih, iw = image.shape[:2]
+    w, h = target_size
+    scale = min(w/iw, h/ih)
+    nw = int(iw*scale)
+    nh = int(ih*scale)
+
+    # Determine the number of channels in the input image
+    if image.shape[2] == 4:  # RGBA
+        new_image = np.zeros((h,w,4), np.uint8)
+        new_image[:,:,3] = 255  # Set alpha channel to fully opaque
+    else:  # RGB
+        new_image = np.zeros((h,w,3), np.uint8)
+    
+    new_image[:,:,:3] = 128  # fill with grey color
+
+    image_resized = cv2.resize(image, (nw,nh))
+
+    # Center the resized image in the new image
+    top, bottom = (h-nh)//2, h-(h-nh)//2
+    left, right = (w-nw)//2, w-(w-nw)//2
+    
+    if image.shape[2] == 4:  # RGBA
+        new_image[top:bottom, left:right, :] = image_resized
+    else:  # RGB
+        new_image[top:bottom, left:right, :3] = image_resized
+
+    return new_image
 
 def generate_yolo_annotation(card_name, bounding_box, image_size):
     class_id = CARD_CLASSES.index(card_name)
@@ -305,7 +329,7 @@ def generate_yolo_annotation(card_name, bounding_box, image_size):
 
 def generate_image(backgrounds, cards_subset, card_backs, output_path, label_path, bbox_image_path, index):
     background = random.choice(backgrounds).copy()
-    background = cv2.resize(background, OUTPUT_SIZE)
+    background = cv2.resize(background, INPUT_SIZE)
     
     card_width = random.randint(*CARD_WIDTH_RANGE)
     
@@ -316,7 +340,7 @@ def generate_image(backgrounds, cards_subset, card_backs, output_path, label_pat
             card_back = resize_image(random.choice(card_backs), card_width)
             angle = random.uniform(0, 360)
             card_back_rotated = rotate_image(card_back, angle)
-            position = random_position(OUTPUT_SIZE, card_back_rotated.shape[:2])
+            position = random_position(INPUT_SIZE, card_back_rotated.shape[:2])
             background = overlay_image(background, card_back_rotated, position)
     
     # Place cards and create bounding boxes
@@ -332,7 +356,7 @@ def generate_image(backgrounds, cards_subset, card_backs, output_path, label_pat
         # Try to place the card without excessive overlap
         max_attempts = 100
         for _ in range(max_attempts):
-            position = random_position(OUTPUT_SIZE, card_blurred.shape[:2])
+            position = random_position(INPUT_SIZE, card_blurred.shape[:2])
             temp_bg = background.copy()
             temp_bg = overlay_image(temp_bg, card_blurred, position)
             
@@ -348,20 +372,40 @@ def generate_image(backgrounds, cards_subset, card_backs, output_path, label_pat
         else:
             print(f"Warning: Could not place card {card_with_rotation.card['name']} without excessive overlap after {max_attempts} attempts.")
     
+    # Apply letterboxing
+    letterboxed_image = letterbox_image(background, LETTERBOX_SIZE)
+    
+    # Resize to final output size
+    final_image = cv2.resize(letterboxed_image, OUTPUT_SIZE)
+    
     # Save clean image
-    cv2.imwrite(str(output_path), cv2.cvtColor(background, cv2.COLOR_BGRA2BGR))
+    cv2.imwrite(str(output_path), final_image)
+    
+    # Adjust bounding boxes for letterboxing and resizing
+    scale_x = OUTPUT_SIZE[0] / LETTERBOX_SIZE[0]
+    scale_y = OUTPUT_SIZE[1] / LETTERBOX_SIZE[1]
+    offset_x = (LETTERBOX_SIZE[0] - INPUT_SIZE[0]) / 2 * scale_x
+    offset_y = (LETTERBOX_SIZE[1] - INPUT_SIZE[1]) / 2 * scale_y
+    
+    adjusted_bounding_boxes = []
+    for card_name, (x, y, w, h) in bounding_boxes:
+        new_x = x * scale_x + offset_x
+        new_y = y * scale_y + offset_y
+        new_w = w * scale_x
+        new_h = h * scale_y
+        adjusted_bounding_boxes.append((card_name, (new_x, new_y, new_w, new_h)))
     
     # Generate YOLO annotation
     with open(label_path, 'w') as f:
-        for card_name, bbox in bounding_boxes:
+        for card_name, bbox in adjusted_bounding_boxes:
             yolo_annotation = generate_yolo_annotation(card_name, bbox, OUTPUT_SIZE)
             f.write(yolo_annotation + '\n')
     
     # Draw bounding boxes and save
-    img_pil = Image.fromarray(cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
+    img_pil = Image.fromarray(cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
     
-    for name, (x, y, w, h) in bounding_boxes:
+    for name, (x, y, w, h) in adjusted_bounding_boxes:
         draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
         draw.text((x, y-15), name, fill="red")
     
@@ -425,10 +469,6 @@ def main():
         print(f"Generated image {i+1}/{NUM_IMAGES}")
     
     # Create data.yaml
-    CARD_CLASSES = ['2c', '2d', '2h', '2s', '3c', '3d', '3h', '3s', '4c', '4d', '4h', '4s', '5c', '5d', '5h', '5s', 
-                    '6c', '6d', '6h', '6s', '7c', '7d', '7h', '7s', '8c', '8d', '8h', '8s', '9c', '9d', '9h', '9s', 
-                    'Ac', 'Ad', 'Ah', 'As', 'Jc', 'Jd', 'Jh', 'Js', 'Kc', 'Kd', 'Kh', 'Ks', 'Qc', 'Qd', 'Qh', 'Qs', 
-                    'Tc', 'Td', 'Th', 'Ts']
     create_data_yaml(DATASET_DIR / 'data.yaml', CARD_CLASSES)
 
 if __name__ == "__main__":
