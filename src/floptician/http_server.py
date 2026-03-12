@@ -2,7 +2,8 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Get the logger from the main module
+from floptician.exceptions import ServerStartupError
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +50,7 @@ class HTTPServer:
         except Exception as e:
             logger.error(f"Error starting HTTP server: {e}", exc_info=True)
             self._is_running.clear()
+            raise ServerStartupError(f"Failed to start HTTP server: {e}") from e
 
     def _run_server(self):
         try:

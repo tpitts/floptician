@@ -5,6 +5,7 @@ import logging
 
 import obsws_python as obs
 
+from floptician.exceptions import OBSConnectionError
 from floptician.models import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -12,11 +13,19 @@ logger = logging.getLogger(__name__)
 
 class OBSClient:
     def __init__(self, config: AppConfig):
-        self.client = obs.ReqClient(
-            host=config.obs.host,
-            port=config.obs.port,
-            password=config.obs.password,
-        )
+        try:
+            self.client = obs.ReqClient(
+                host=config.obs.host,
+                port=config.obs.port,
+                password=config.obs.password,
+            )
+        except ConnectionRefusedError as e:
+            raise OBSConnectionError(
+                f"Unable to connect to OBS at {config.obs.host}:{config.obs.port}. "
+                "Ensure OBS is running and the WebSocket server is enabled."
+            ) from e
+        except Exception as e:
+            raise OBSConnectionError(f"Unexpected error connecting to OBS: {e}") from e
         self.config = config
         logger.debug("OBSClient initialized")
 

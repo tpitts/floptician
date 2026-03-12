@@ -4,7 +4,8 @@ import threading
 
 from websocket_server import WebsocketServer
 
-# Get the logger from the main module
+from floptician.exceptions import ServerStartupError
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +32,7 @@ class WebSocketServer:
         except Exception as e:
             logger.error(f"Error starting WebSocket server: {e}", exc_info=True)
             self._is_running.clear()
+            raise ServerStartupError(f"Failed to start WebSocket server: {e}") from e
 
     def _run_server(self):
         try:

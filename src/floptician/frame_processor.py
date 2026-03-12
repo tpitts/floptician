@@ -9,6 +9,7 @@ import time
 import cv2
 import numpy as np
 
+from floptician.exceptions import CameraError, FrameProcessingError
 from floptician.models import AppConfig, BoardResult, BoardState, CaptureMode, FrameInfo, FrameProcessorState
 from floptician.protocols import MessageBroadcaster, OBSProtocol
 
@@ -88,8 +89,7 @@ class FrameProcessor:
             self.last_frame_id += 1
             return FrameInfo(self.last_frame_id, frame, time.time()) if frame is not None else None
         except Exception as e:
-            logger.error(f"Error in frame capture: {e!s}", exc_info=True)
-            return None
+            raise CameraError(f"Error in frame capture: {e}") from e
 
     def is_valid_frame(self, frame: np.ndarray) -> bool:
         if frame is None:
@@ -157,8 +157,7 @@ class FrameProcessor:
                 return None
 
         except Exception as e:
-            logger.error(f"Error in frame processing: {e!s}", exc_info=True)
-            raise
+            raise FrameProcessingError(f"Error in frame processing: {e}") from e
 
     def check_for_quit(self):
         if self.config.platform == "Windows":
@@ -200,6 +199,9 @@ class FrameProcessor:
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user. Shutting down...")
+        except (CameraError, FrameProcessingError) as e:
+            logger.error(f"Processing error in main loop: {e!s}", exc_info=True)
+            self.state = FrameProcessorState.FAILED
         except Exception as e:
             logger.error(f"Unexpected error in main loop: {e!s}", exc_info=True)
             self.state = FrameProcessorState.FAILED

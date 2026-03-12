@@ -12,6 +12,12 @@ from rich.console import Console
 from rich.table import Table
 
 from floptician.config_utils import load_config, validate_config
+from floptician.exceptions import (
+    ConfigurationError,
+    ModelLoadError,
+    OBSConnectionError,
+    ServerStartupError,
+)
 from floptician.logging_config import configure_logging
 from floptician.models import AppConfig, CaptureMode
 
@@ -53,7 +59,7 @@ def _determine_torch_device() -> str:
 def _initialize_config(config_path: str | None, debug: bool, json_log: bool = False) -> AppConfig:
     try:
         config = load_config(config_path)
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, ConfigurationError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
 
@@ -151,6 +157,13 @@ def run(
         if not ws_running:
             raise RuntimeError("WebSocket server failed to start within the timeout period")
 
+    except ServerStartupError as e:
+        logger.error(f"Server startup error: {e}")
+        if http_server:
+            http_server.stop()
+        if websocket_server:
+            websocket_server.stop()
+        raise typer.Exit(code=1) from None
     except Exception as e:
         logger.error(f"Error starting servers: {e}", exc_info=True)
         if http_server:
@@ -166,8 +179,8 @@ def run(
         logger.info(
             f"BoardProcessor started | YOLO model: {app_config.yolo.model} | Inference: {app_config.torch_device}"
         )
-    except ValueError as e:
-        logger.error(f"Error initializing BoardProcessor: {e!s}")
+    except ModelLoadError as e:
+        logger.error(f"Error loading YOLO model: {e!s}")
         http_server.stop()
         websocket_server.stop()
         raise typer.Exit(code=1) from None
@@ -181,15 +194,8 @@ def run(
             f"using version: {version_info.obs_web_socket_version}"
         )
         obs_client.setup_overlay()
-    except ConnectionRefusedError:
-        logger.error(
-            "Error: Unable to connect to OBS. Please ensure OBS is running and the WebSocket server is enabled."
-        )
-        http_server.stop()
-        websocket_server.stop()
-        raise typer.Exit(code=1) from None
-    except Exception as e:
-        logger.error(f"Error: Unexpected issue when connecting to OBS: {e!s}")
+    except OBSConnectionError as e:
+        logger.error(str(e))
         http_server.stop()
         websocket_server.stop()
         raise typer.Exit(code=1) from None
@@ -268,13 +274,13 @@ def validate_config_cmd(
     """Validate a configuration file."""
     try:
         app_config = load_config(config)
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, ConfigurationError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
 
     try:
         validate_config(app_config)
-    except ValueError as e:
+    except ConfigurationError as e:
         console.print(f"[red]Validation error:[/red] {e}")
         raise typer.Exit(code=1) from None
 

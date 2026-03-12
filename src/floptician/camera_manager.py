@@ -12,6 +12,8 @@ import cv2
 import numpy as np
 from imageio_ffmpeg import get_ffmpeg_exe
 
+from floptician.exceptions import CameraError
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,8 +108,7 @@ class FFmpegCameraCapture:
                 logger.error(f"Start error ({mode}): {e}")
                 if self.proc:
                     self.proc.terminate()
-        logger.error("FFmpeg capture failed on all modes")
-        return False
+        raise CameraError("FFmpeg capture failed on all modes")
 
     def _reader(self):
         frame_size = self.width * self.height * 3
@@ -179,6 +180,13 @@ class CameraManager:
         self.height = None
         self.fps = None
         self.refresh_camera_list()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release_camera()
+        return False
 
     def refresh_camera_list(self):
         self.cameras.clear()

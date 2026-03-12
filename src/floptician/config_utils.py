@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from floptician.exceptions import ConfigurationError
 from floptician.models import AppConfig, BoardProcessorConfig, CaptureConfig, CaptureMode, OBSConfig, YOLOConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -117,14 +118,14 @@ def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
 
 def validate_config(config: AppConfig) -> None:
     if not (0.0 < config.yolo.confidence_threshold <= 1.0):
-        raise ValueError(f"YOLO confidence_threshold must be in (0, 1], got {config.yolo.confidence_threshold}")
+        raise ConfigurationError(f"YOLO confidence_threshold must be in (0, 1], got {config.yolo.confidence_threshold}")
     if not (0.0 < config.yolo.overlap_threshold <= 1.0):
-        raise ValueError(f"YOLO overlap_threshold must be in (0, 1], got {config.yolo.overlap_threshold}")
+        raise ConfigurationError(f"YOLO overlap_threshold must be in (0, 1], got {config.yolo.overlap_threshold}")
     model_path = Path(config.yolo.model)
     if not model_path.exists():
-        raise ValueError(f"YOLO model file not found: {model_path}")
+        raise ConfigurationError(f"YOLO model file not found: {model_path}")
     if config.capture.fps <= 0:
-        raise ValueError(f"Capture FPS must be positive, got {config.capture.fps}")
+        raise ConfigurationError(f"Capture FPS must be positive, got {config.capture.fps}")
 
 
 def load_config(config_path: str | None = None) -> AppConfig:
@@ -134,9 +135,9 @@ def load_config(config_path: str | None = None) -> AppConfig:
         with resolved_path.open("r", encoding="utf-8") as file:
             raw = yaml.safe_load(file)
     except yaml.YAMLError as exc:
-        raise ValueError(f"Error parsing config file {resolved_path}: {exc}") from exc
+        raise ConfigurationError(f"Error parsing config file {resolved_path}: {exc}") from exc
 
     if not raw:
-        raise ValueError(f"Config file is empty: {resolved_path}")
+        raise ConfigurationError(f"Config file is empty: {resolved_path}")
 
     return _build_app_config(raw, resolved_path)

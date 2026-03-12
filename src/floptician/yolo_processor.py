@@ -10,6 +10,7 @@ import torch
 from PIL import Image
 from ultralytics import YOLO
 
+from floptician.exceptions import ModelLoadError
 from floptician.models import BoundingBox, CardDetection, YOLOConfig
 
 # Set YOLOv8 to quiet mode
@@ -31,7 +32,7 @@ class YOLOProcessor:
             self.model_type = "mlpackage"
             self.model = self._load_coreml_model(config.model)
         else:
-            raise ValueError("Unsupported model format. Please provide a .pt or .mlpackage file.")
+            raise ModelLoadError("Unsupported model format. Please provide a .pt or .mlpackage file.")
 
     def _select_device(self) -> str:
         if torch.cuda.is_available():
@@ -48,7 +49,7 @@ class YOLOProcessor:
         try:
             import coremltools as ct
         except ImportError as e:
-            raise ImportError("coremltools is required to use .mlpackage models.") from e
+            raise ModelLoadError("coremltools is required to use .mlpackage models.") from e
 
         try:
             model = ct.models.MLModel(model_path)
@@ -57,8 +58,7 @@ class YOLOProcessor:
             logger.info(f"Core ML model output names: {model.output_description}")
             return model
         except Exception as e:
-            logger.error(f"Failed to load Core ML model from {model_path}: {e}")
-            raise
+            raise ModelLoadError(f"Failed to load Core ML model from {model_path}: {e}") from e
 
     def process_frame(self, frame) -> list[CardDetection]:
         try:
@@ -77,7 +77,7 @@ class YOLOProcessor:
                 result = self.model.predict(input_data)
                 detections = self._extract_detections_coreml(result)
             else:
-                raise ValueError("Unsupported model type.")
+                raise ModelLoadError("Unsupported model type.")
 
             return self._filter_detections(detections)
         except Exception as e:

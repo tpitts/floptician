@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from floptician.config_utils import find_config_path, load_config, validate_config
+from floptician.exceptions import ConfigurationError
 from floptician.models import AppConfig, CaptureMode
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "config"
@@ -29,13 +30,13 @@ class TestLoadConfig:
     def test_empty_config_raises(self, tmp_path: Path):
         empty = tmp_path / "empty.yaml"
         empty.write_text("")
-        with pytest.raises(ValueError, match="empty"):
+        with pytest.raises(ConfigurationError, match="empty"):
             load_config(str(empty))
 
     def test_invalid_yaml_raises(self, tmp_path: Path):
         bad = tmp_path / "bad.yaml"
         bad.write_text("foo: [bar: baz")
-        with pytest.raises(ValueError, match="Error parsing"):
+        with pytest.raises(ConfigurationError, match="Error parsing"):
             load_config(str(bad))
 
     def test_obs_password_env_override(self, monkeypatch):
@@ -57,12 +58,12 @@ class TestValidateConfig:
 
     def test_invalid_confidence_threshold(self, app_config: AppConfig):
         app_config.yolo.confidence_threshold = 5.0
-        with pytest.raises(ValueError, match="confidence_threshold"):
+        with pytest.raises(ConfigurationError, match="confidence_threshold"):
             validate_config(app_config)
 
     def test_invalid_overlap_threshold(self, app_config: AppConfig):
         app_config.yolo.overlap_threshold = -1.0
-        with pytest.raises(ValueError, match="overlap_threshold"):
+        with pytest.raises(ConfigurationError, match="overlap_threshold"):
             validate_config(app_config)
 
     def test_negative_fps_raises(self, app_config: AppConfig, tmp_path: Path):
@@ -70,12 +71,12 @@ class TestValidateConfig:
         model.write_text("fake")
         app_config.yolo.model = str(model)
         app_config.capture.fps = -1.0
-        with pytest.raises(ValueError, match="FPS"):
+        with pytest.raises(ConfigurationError, match="FPS"):
             validate_config(app_config)
 
     def test_missing_model_file_raises(self, app_config: AppConfig):
         app_config.yolo.model = "/nonexistent/model.pt"
-        with pytest.raises(ValueError, match="model file not found"):
+        with pytest.raises(ConfigurationError, match="model file not found"):
             validate_config(app_config)
 
 
