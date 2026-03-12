@@ -1,52 +1,45 @@
+from __future__ import annotations
+
 import logging
 import time
 from collections import deque
-from enum import Enum
-from typing import Any
 
 from floptician.community_card_detector import CommunityCardDetector
+from floptician.models import (
+    AppConfig,
+    BoardResult,
+    BoardState,
+    CommunityCard,
+    TransitionState,
+)
 from floptician.yolo_processor import YOLOProcessor
 
 logger = logging.getLogger(__name__)
 
 
-class BoardState(Enum):
-    NOT_SHOWING = "Not Showing"
-    SHOWING = "Showing"
-
-
-class TransitionState(Enum):
-    NONE = "None"
-    APPEARING = "Appearing"
-    DISAPPEARING = "Disappearing"
-
-
 class BoardProcessor:
     MAX_HISTORY_SIZE = 1000
 
-    def __init__(self, config: dict[str, Any]):
-
-        self.yolo_processor = YOLOProcessor(
-            config["yolo"]["model"], config["yolo"]["confidence_threshold"], config["yolo"]["overlap_threshold"]
-        )
-        self.config = config["board_processor"]
+    def __init__(self, config: AppConfig):
+        self.yolo_processor = YOLOProcessor(config.yolo)
+        self.config = config.board_processor
         self.community_card_detector = CommunityCardDetector(self.config)
         self.frame_id = 0
         self.board_state = BoardState.NOT_SHOWING
         self.transition_state = TransitionState.NONE
-        self.detection_history = deque(maxlen=self.MAX_HISTORY_SIZE)
+        self.detection_history: deque[list[CommunityCard]] = deque(maxlen=self.MAX_HISTORY_SIZE)
         self.last_state_change = time.time()
-        self.stable_board = []
-        self.transition_start_time = None
+        self.stable_board: list[CommunityCard] = []
+        self.transition_start_time: float | None = None
 
-    def process_frame(self, frame) -> dict[str, Any]:
+    def process_frame(self, frame) -> BoardResult:
         self.frame_id += 1
         start_time = time.time()
         try:
             filtered_detections = self.yolo_processor.process_frame(frame) or []
             detected_board = self.community_card_detector.detect_community_cards(filtered_detections)
-            sorted_board = sorted(detected_board, key=lambda card: (card["y"], card["x"]))
-            card_values = [card["card"] for card in sorted_board]
+            sorted_board = sorted(detected_board, key=lambda card: (card.y, card.x))
+            card_values = [card.card for card in sorted_board]
             logger.debug(f"Detected board: {card_values}")
             new_state, new_transition_state, detected_board, displayed_board = self._update_board_state(detected_board)
 
@@ -55,57 +48,57 @@ class BoardProcessor:
 
             processing_time = time.time() - start_time
 
-            # Remove bounding boxes from detected board and updated displayed board
-            detected_board = self._remove_bounding_boxes(detected_board)
-            updated_displayed_board = self._remove_bounding_boxes(updated_displayed_board)
-
-            return {
-                "timestamp": time.time(),
-                "state": new_state,
-                "board": updated_displayed_board,
-                "debug_info": {
-                    "detections": [{"card": d["card"], "confidence": d["confidence"]} for d in filtered_detections],
+            return BoardResult(
+                timestamp=time.time(),
+                state=new_state,
+                board=updated_displayed_board,
+                debug_info={
+                    "detections": [{"card": d.card, "confidence": d.confidence} for d in filtered_detections],
                     "processing_time": processing_time,
                     "frame_id": self.frame_id,
-                    "current_state": new_state,
-                    "transition_state": new_transition_state,
-                    "detected_board": detected_board,
+                    "current_state": new_state.value,
+                    "transition_state": new_transition_state.value,
+                    "detected_board": [
+                        {"card": c.card, "x": c.x, "y": c.y, "confidence": c.confidence} for c in detected_board
+                    ],
                 },
-            }
+            )
         except Exception as e:
             logger.error(f"Error processing frame: {e!s}")
-            return {
-                "timestamp": time.time(),
-                "state": BoardState.NOT_SHOWING,
-                "board": [],
-                "debug_info": {
-                    "current_state": BoardState.NOT_SHOWING,
-                    "transition_state": TransitionState.NONE,
+            return BoardResult(
+                timestamp=time.time(),
+                state=BoardState.NOT_SHOWING,
+                board=[],
+                debug_info={
+                    "current_state": BoardState.NOT_SHOWING.value,
+                    "transition_state": TransitionState.NONE.value,
                     "error": str(e),
                 },
-            }
+            )
 
-    def _update_positions(self, stable_board: list[dict], detected_board: list[dict]) -> list[dict]:
-        updated_board = []
+    def _update_positions(
+        self, stable_board: list[CommunityCard], detected_board: list[CommunityCard]
+    ) -> list[CommunityCard]:
+        updated_board: list[CommunityCard] = []
         for stable_card in stable_board:
             for detected_card in detected_board:
-                if stable_card["card"] == detected_card["card"]:
-                    updated_card = stable_card.copy()
-                    updated_card["x"] = detected_card["x"]
-                    updated_card["y"] = detected_card["y"]
-                    updated_board.append(updated_card)
+                if stable_card.card == detected_card.card:
+                    updated_board.append(
+                        CommunityCard(
+                            card=stable_card.card,
+                            x=detected_card.x,
+                            y=detected_card.y,
+                            confidence=stable_card.confidence,
+                        )
+                    )
                     break
             else:
                 updated_board.append(stable_card)
         return updated_board
 
     def _update_board_state(
-        self, detected_board: list[dict]
-    ) -> tuple[BoardState, TransitionState, list[dict], list[dict]]:
-        """
-        Update the state machine based on current detections and history.
-        Returns the current board state, transition state, detected board, and displayed board.
-        """
+        self, detected_board: list[CommunityCard]
+    ) -> tuple[BoardState, TransitionState, list[CommunityCard], list[CommunityCard]]:
         self.detection_history.append(detected_board)
 
         if self.board_state == BoardState.NOT_SHOWING:
@@ -123,7 +116,7 @@ class BoardProcessor:
             elif self.transition_state == TransitionState.APPEARING:
                 if not detected_board or self._board_has_missing_cards(self.stable_board, detected_board):
                     logger.debug("Reverting to NOT_SHOWING/NONE due to missing cards during APPEARING")
-                    self.board_state, self.transition_state = self._revert_to_previous_state(detected_board)
+                    self.board_state, self.transition_state = self._revert_to_previous_state()
                     self.last_state_change = time.time()
                 elif self._meets_appearance_thresholds(detected_board):
                     logger.info("Appearance thresholds met, showing cards")
@@ -179,80 +172,46 @@ class BoardProcessor:
 
         return self.board_state, self.transition_state, detected_board, self.stable_board
 
-    def _transition_to(
-        self, new_board_state: BoardState, new_transition_state: TransitionState, new_board: list[dict]
-    ) -> tuple[BoardState, TransitionState, list[dict], list[dict]]:
-        """
-        Handle state transitions, update internal state, and log the transition.
-        """
-        self.board_state = new_board_state
-        self.transition_state = new_transition_state
-        self.last_state_change = time.time()
-
-        if new_board_state == BoardState.SHOWING and new_transition_state == TransitionState.NONE:
-            self.stable_board = new_board
-
-        displayed_board = self.stable_board if new_transition_state == TransitionState.DISAPPEARING else new_board
-
-        logger.info(
-            f"Transitioning to {self._get_combined_state()} state. New board: {[card['card'] for card in new_board]}"
-        )
-        return new_board_state, new_transition_state, new_board, displayed_board
-
-    def _revert_to_previous_state(self, detected_board: list[dict]) -> tuple[BoardState, TransitionState]:
-        """
-        Revert to the previous stable state when a transition fails.
-        """
+    def _revert_to_previous_state(self) -> tuple[BoardState, TransitionState]:
         if self.board_state == BoardState.NOT_SHOWING:
             return BoardState.NOT_SHOWING, TransitionState.NONE
         else:
             return BoardState.SHOWING, TransitionState.NONE
 
     def _get_combined_state(self) -> str:
-        """
-        Get a string representation of the combined board and transition state.
-        """
         if self.transition_state == TransitionState.NONE:
             return self.board_state.value
         return f"{self.board_state.value}_{self.transition_state.value}"
 
-    def _boards_match(self, board1: list[dict], board2: list[dict]) -> bool:
-        """
-        Check if two boards match exactly.
-        """
-        return set(card["card"] for card in board1) == set(card["card"] for card in board2)
+    def _boards_match(self, board1: list[CommunityCard], board2: list[CommunityCard]) -> bool:
+        return {card.card for card in board1} == {card.card for card in board2}
 
-    def _board_has_missing_cards(self, board1: list[dict], board2: list[dict]) -> bool:
-        """
-        Check if any cards from board1 are missing in board2.
-        """
-        return any(card["card"] not in [c["card"] for c in board2] for card in board1)
+    def _board_has_missing_cards(self, board1: list[CommunityCard], board2: list[CommunityCard]) -> bool:
+        board2_cards = {c.card for c in board2}
+        return any(card.card not in board2_cards for card in board1)
 
-    def _board_has_new_cards(self, board1: list[dict], board2: list[dict]) -> bool:
-        """
-        Check if board1 has any new cards compared to board2, without any removals.
-        """
-        cards1 = set(card["card"] for card in board1)
-        cards2 = set(card["card"] for card in board2)
+    def _board_has_new_cards(self, board1: list[CommunityCard], board2: list[CommunityCard]) -> bool:
+        cards1 = {card.card for card in board1}
+        cards2 = {card.card for card in board2}
         return cards1.issuperset(cards2) and cards1 != cards2
 
-    def _meets_appearance_thresholds(self, board: list[dict]) -> bool:
-        result = self._is_new_state_established(self.config["min_frames_to_show"], self.config["min_ms_to_show"], board)
+    def _meets_appearance_thresholds(self, board: list[CommunityCard]) -> bool:
+        result = self._is_new_state_established(self.config.min_frames_to_show, self.config.min_ms_to_show, board)
         logger.debug(f"Appearance thresholds met: {result}")
         return result
 
     def _meets_removal_thresholds(self) -> bool:
-        return self._is_consistent_removal(self.config["min_frames_to_remove"], self.config["min_ms_to_remove"])
+        return self._is_consistent_removal(self.config.min_frames_to_remove, self.config.min_ms_to_remove)
 
     def _is_consistent_removal(self, min_frames: int, min_ms: int) -> bool:
         if len(self.detection_history) < min_frames:
             logger.debug(f"Not enough frames in history: {len(self.detection_history)} < {min_frames}")
             return False
 
-        stable_card_set = set(card["card"] for card in self.stable_board)
+        stable_card_set = {card.card for card in self.stable_board}
 
         for i, board in enumerate(list(self.detection_history)[-min_frames:], 1):
-            current_card_set = set(card["card"] for card in board)
+            current_card_set = {card.card for card in board}
             if current_card_set == stable_card_set:
                 logger.debug(f"Frame {i}: Detected board matches stable board")
                 return False
@@ -263,26 +222,17 @@ class BoardProcessor:
 
         return time_consistent
 
-    def _is_new_state_established(self, min_frames: int, min_ms: int, target_board: list[dict]) -> bool:
-        """
-        Check if a new state has been consistently detected for a specified number of frames and duration.
-        This helps prevent rapid state changes due to momentary detection errors.
-
-        We only want to evaluate the card values, not other attributes like confidence and bounding box.
-        """
+    def _is_new_state_established(self, min_frames: int, min_ms: int, target_board: list[CommunityCard]) -> bool:
         if len(self.detection_history) < min_frames:
             logger.debug(f"Not enough frames in history: {len(self.detection_history)} < {min_frames}")
             return False
 
-        # Create sets of card identifiers (ignoring bounding boxes and confidence)
-        target_card_set = set(card["card"] for card in target_board)
+        target_card_set = {card.card for card in target_board}
 
         for i, board in enumerate(list(self.detection_history)[-min_frames:], 1):
-            current_card_set = set(card["card"] for card in board)
+            current_card_set = {card.card for card in board}
             if current_card_set != target_card_set:
-                logger.debug(
-                    f"Frame {i}: Detected board {current_card_set} does not match target board {target_card_set}"
-                )
+                logger.debug(f"Frame {i}: Detected board {current_card_set} does not match target {target_card_set}")
                 return False
 
         time_consistent = (time.time() - self.last_state_change) >= (min_ms / 1000)
@@ -290,19 +240,3 @@ class BoardProcessor:
         logger.debug(f"Time consistent: {time_consistent} (Elapsed: {elapsed}s, Required: {min_ms / 1000}s)")
 
         return time_consistent
-
-    def _remove_bounding_boxes(self, board: list[dict]) -> list[dict]:
-        """
-        Remove bounding box information from the board representation.
-        """
-        return [{k: v for k, v in card.items() if k != "box"} for card in board]
-
-    def _format_board(self, cards: list[dict]) -> list[dict]:
-        """
-        Format the detected cards into a standardized board representation,
-        always ordered from left to right based on bounding box information.
-        """
-        if not cards:
-            return []
-        sorted_cards = sorted(cards, key=lambda c: c["box"][0])
-        return [{"card": card["card"], "x": i, "y": 1} for i, card in enumerate(sorted_cards)]

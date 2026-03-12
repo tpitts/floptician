@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from floptician.models import AppConfig, BoardProcessorConfig, CaptureConfig, CaptureMode, OBSConfig, YOLOConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
@@ -49,36 +53,90 @@ def find_config_path(config_path: str | None = None) -> Path:
     raise FileNotFoundError(f"No config file found. Expected {DEFAULT_CONFIG_PATH} or {EXAMPLE_CONFIG_PATH}.")
 
 
-def _normalize_config_paths(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
+def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
     config_dir = config_path.parent
 
-    for key in ("html_file", "output_dir"):
-        if isinstance(config.get(key), str):
-            config[key] = str(resolve_path(config[key], config_dir))
+    # Resolve paths relative to config dir
+    html_file = str(resolve_path(raw.get("html_file", "src/floptician/static/overlay.html"), config_dir))
+    output_dir = str(resolve_path(raw.get("output_dir", "output"), config_dir))
 
-    yolo_config = config.get("yolo")
-    if isinstance(yolo_config, dict):
-        if "mcoreml_model" in yolo_config and "coreml_model" not in yolo_config:
-            yolo_config["coreml_model"] = yolo_config["mcoreml_model"]
+    # OBS
+    obs_raw = raw.get("obs", {})
+    obs_password = os.getenv("OBS_PASSWORD", obs_raw.get("password", ""))
+    obs = OBSConfig(
+        host=obs_raw.get("host", "localhost"),
+        port=obs_raw.get("port", 4455),
+        password=obs_password,
+    )
 
-        for key in ("model", "coreml_model", "mcoreml_model"):
-            if isinstance(yolo_config.get(key), str):
-                yolo_config[key] = str(resolve_path(yolo_config[key], config_dir))
+    # Capture
+    cap_raw = raw.get("capture", {})
+    capture = CaptureConfig(
+        mode=CaptureMode(cap_raw.get("mode", "direct_webcam")),
+        width=cap_raw.get("width", 640),
+        height=cap_raw.get("height", 360),
+        fps=cap_raw.get("fps", 1.8),
+    )
 
-    config["_config_path"] = str(config_path)
-    return config
+    # YOLO
+    yolo_raw = raw.get("yolo", {})
+    model_path = yolo_raw.get("model", "models/yolov8l-2026-03-10.pt")
+    model_path = str(resolve_path(model_path, config_dir))
+    yolo = YOLOConfig(
+        model=model_path,
+        confidence_threshold=yolo_raw.get("confidence_threshold", 0.70),
+        overlap_threshold=yolo_raw.get("overlap_threshold", 0.80),
+    )
+
+    # Board processor
+    bp_raw = raw.get("board_processor", {})
+    board_processor = BoardProcessorConfig(
+        vertical_alignment_threshold=bp_raw.get("vertical_alignment_threshold", 0.20),
+        horizontal_alignment_threshold=bp_raw.get("horizontal_alignment_threshold", 0.10),
+        image_height=bp_raw.get("image_height", 1080),
+        min_frames_to_show=bp_raw.get("min_frames_to_show", 3),
+        min_ms_to_show=bp_raw.get("min_ms_to_show", 1200),
+        min_frames_to_remove=bp_raw.get("min_frames_to_remove", 6),
+        min_ms_to_remove=bp_raw.get("min_ms_to_remove", 4200),
+    )
+
+    return AppConfig(
+        debug=raw.get("debug", False),
+        host=raw.get("host", "localhost"),
+        http_port=raw.get("http_port", 8000),
+        websocket_port=raw.get("websocket_port", 9001),
+        html_file=html_file,
+        output_dir=output_dir,
+        config_path=str(config_path),
+        obs=obs,
+        capture=capture,
+        yolo=yolo,
+        board_processor=board_processor,
+    )
 
 
-def load_config(config_path: str | None = None) -> dict[str, Any]:
+def validate_config(config: AppConfig) -> None:
+    if not (0.0 < config.yolo.confidence_threshold <= 1.0):
+        raise ValueError(f"YOLO confidence_threshold must be in (0, 1], got {config.yolo.confidence_threshold}")
+    if not (0.0 < config.yolo.overlap_threshold <= 1.0):
+        raise ValueError(f"YOLO overlap_threshold must be in (0, 1], got {config.yolo.overlap_threshold}")
+    model_path = Path(config.yolo.model)
+    if not model_path.exists():
+        raise ValueError(f"YOLO model file not found: {model_path}")
+    if config.capture.fps <= 0:
+        raise ValueError(f"Capture FPS must be positive, got {config.capture.fps}")
+
+
+def load_config(config_path: str | None = None) -> AppConfig:
     resolved_path = find_config_path(config_path)
 
     try:
         with resolved_path.open("r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
+            raw = yaml.safe_load(file)
     except yaml.YAMLError as exc:
         raise ValueError(f"Error parsing config file {resolved_path}: {exc}") from exc
 
-    if not config:
+    if not raw:
         raise ValueError(f"Config file is empty: {resolved_path}")
 
-    return _normalize_config_paths(config, resolved_path)
+    return _build_app_config(raw, resolved_path)

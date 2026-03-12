@@ -5,7 +5,6 @@ import platform
 import sys
 import time
 from datetime import datetime
-from typing import Any
 
 import torch
 
@@ -14,10 +13,10 @@ from floptician.camera_manager import CameraManager
 from floptician.config_utils import load_config
 from floptician.frame_processor import FrameProcessor
 from floptician.http_server import HTTPServer
+from floptician.models import AppConfig, CaptureMode
 from floptician.obs_client import OBSClient
 from floptician.websocket_server import WebSocketServer
 
-# Create logger after configuring
 logger = logging.getLogger(__name__)
 
 BANNER = """
@@ -36,12 +35,6 @@ $$ |      $$ |\\$$$$$$  |$$$$$$$  | \\$$$$  |$$ |\\$$$$$$$\\ $$ |\\$$$$$$$ |$$ |
 
 
 def determine_torch_device() -> str:
-    """
-    Determine the best available PyTorch device for YOLO inference.
-
-    Returns:
-        str: 'cuda', 'mps', or 'cpu'
-    """
     if torch.cuda.is_available():
         return "cuda"
     elif platform.system() == "Darwin" and platform.machine() == "arm64" and torch.backends.mps.is_available():
@@ -50,19 +43,15 @@ def determine_torch_device() -> str:
         return "cpu"
 
 
-# Set up logging configuration
 def configure_logging(debug_mode):
     logging_level = logging.DEBUG if debug_mode else logging.INFO
 
-    # Configure the root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging_level)
 
-    # Remove any existing handlers
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
-    # Add stream handler
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging_level)
     stream_handler.setFormatter(
@@ -70,19 +59,12 @@ def configure_logging(debug_mode):
     )
     root_logger.addHandler(stream_handler)
 
-    # Suppress YOLO logging
     logging.getLogger("ultralytics").setLevel(logging.ERROR)
     logging.getLogger("obsws_python").setLevel(logging.ERROR)
     logging.getLogger("comtypes").setLevel(logging.ERROR)
 
 
-def initialize_config() -> dict[str, Any]:
-    """
-    Initialize and return the configuration for the application.
-
-    Returns:
-        Dict[str, Any]: Initialized configuration.
-    """
+def initialize_config() -> AppConfig:
     parser = argparse.ArgumentParser(description="Floptician card detection system")
     parser.add_argument("--config", help="Path to the config YAML file")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -94,19 +76,15 @@ def initialize_config() -> dict[str, Any]:
         print(str(e))
         sys.exit(1)
 
-    config["debug"] = args.debug or config.get("debug", False)
-    configure_logging(config["debug"])
+    if args.debug:
+        config.debug = True
+    configure_logging(config.debug)
 
-    config["platform"] = platform.system()
-    config["torch_device"] = determine_torch_device()
+    config.platform = platform.system()
+    config.torch_device = determine_torch_device()
 
-    # if config['torch_device'] == 'mps':
-    #    config['yolo']['model'] = config['yolo'].get('coreml_model', config['yolo']['model'])
-
-    config["obs"]["password"] = os.getenv("OBS_PASSWORD", config["obs"].get("password", ""))
-
-    config["output_dir"] = os.path.join(config["output_dir"], datetime.now().strftime("%Y%m%d_%H%M%S"))
-    os.makedirs(config["output_dir"], exist_ok=True)
+    config.output_dir = os.path.join(config.output_dir, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(config.output_dir, exist_ok=True)
 
     return config
 
@@ -131,21 +109,19 @@ def select_input(inputs, input_type):
             print("Invalid input. Please enter a number.")
 
 
-def start_servers(config, timeout=5):
-    """Start HTTP and WebSocket servers and ensure they are ready."""
+def start_servers(config: AppConfig, timeout=5):
     http_server = None
     websocket_server = None
     try:
-        http_server = HTTPServer(config["host"], config["http_port"], config["html_file"])
+        http_server = HTTPServer(config.host, config.http_port, config.html_file)
         http_server.start()
 
-        websocket_server = WebSocketServer(config["host"], config["websocket_port"])
+        websocket_server = WebSocketServer(config.host, config.websocket_port)
         websocket_server.start()
 
         start_time = time.time()
         http_running = ws_running = False
 
-        # Loop until the servers are running or the timeout is reached
         while time.time() - start_time < timeout:
             if not http_running and http_server.is_running():
                 logger.info("HTTP server is running")
@@ -156,11 +132,10 @@ def start_servers(config, timeout=5):
                 ws_running = True
 
             if http_running and ws_running:
-                break  # Exit loop if both servers are confirmed running
+                break
 
-            time.sleep(0.1)  # Small sleep to avoid busy-waiting
+            time.sleep(0.1)
 
-        # If either server did not start within the timeout, raise an error
         if not http_running:
             raise RuntimeError("HTTP server failed to start within the timeout period")
         if not ws_running:
@@ -177,38 +152,22 @@ def start_servers(config, timeout=5):
         sys.exit(1)
 
 
-def start_capture_loop(config, websocket_server):
-    if "capture" not in config:
-        logger.error("Error: 'capture' section missing from configuration. Please check your config.yaml file.")
-        return
-    if "mode" not in config["capture"]:
-        logger.error("Error: 'mode' not specified in capture configuration. Please check your config.yaml file.")
-        return
-    if "yolo" not in config or "model" not in config["yolo"]:
-        logger.error("Error: YOLO model path not found in configuration. Please check your config.yaml file.")
-        return
-
+def start_capture_loop(config: AppConfig, websocket_server):
     try:
         board_processor = BoardProcessor(config)
-        logger.info(
-            f"BoardProcessor started | YOLO model: {config['yolo']['model']} | Inference: {config['torch_device']}"
-        )
+        logger.info(f"BoardProcessor started | YOLO model: {config.yolo.model} | Inference: {config.torch_device}")
     except ValueError as e:
         logger.error(f"Error initializing BoardProcessor: {e!s}")
         return
 
     try:
-        # Connect to OBS WebSocket regardless of capture mode
         obs_client = OBSClient(config)
         version_info = obs_client.get_version()
         logger.info(
-            f"Connected to OBS WebSocket API {config['obs']['host']}:{config['obs']['port']} "
+            f"Connected to OBS WebSocket API {config.obs.host}:{config.obs.port} "
             f"using version: {version_info.obs_web_socket_version}"
         )
-
-        # Setup OBS overlay
         obs_client.setup_overlay()
-
     except ConnectionRefusedError:
         logger.error(
             "Error: Unable to connect to OBS. Please ensure OBS is running and the WebSocket server is enabled."
@@ -218,16 +177,14 @@ def start_capture_loop(config, websocket_server):
         logger.error(f"Error: Unexpected issue when connecting to OBS: {e!s}")
         return
 
-    # Set up capture method based on config
-    if config["capture"]["mode"] == "obs_websocket":
+    if config.capture.mode == CaptureMode.OBS_WEBSOCKET:
         webcams = obs_client.get_webcams()
         if not webcams:
             logger.error("No webcams found in OBS. Exiting...")
             return
+        config.capture.selected_webcam = webcams[0] if len(webcams) == 1 else select_input(webcams, "webcam")
 
-        config["capture"]["selected_webcam"] = webcams[0] if len(webcams) == 1 else select_input(webcams, "webcam")
-
-    elif config["capture"]["mode"] == "direct_webcam":
+    elif config.capture.mode == CaptureMode.DIRECT_WEBCAM:
         camera_manager = CameraManager()
         cameras = camera_manager.get_available_cameras()
         if not cameras:
@@ -239,11 +196,11 @@ def start_capture_loop(config, websocket_server):
             logger.error(f"Failed to open camera {selected_camera['camera_name']}. Exiting...")
             return
 
-        camera_manager.set_resolution(config["capture"]["width"], config["capture"]["height"])
-        config["capture"]["camera_manager"] = camera_manager
+        camera_manager.set_resolution(config.capture.width, config.capture.height)
+        config.capture.camera_manager = camera_manager
 
     else:
-        logger.error(f"Invalid capture mode: {config['capture']['mode']}. Exiting...")
+        logger.error(f"Invalid capture mode: {config.capture.mode}. Exiting...")
         return
 
     logger.info("Starting frame processor...")
@@ -264,12 +221,11 @@ def main():
 
     config = initialize_config()
 
-    if config["debug"]:
+    if config.debug:
         logger.debug("Debug mode is enabled.")
-    logger.info(f"Platform: {config['platform']}")
-    logger.info(f"Inference Device: {config['torch_device']}")
+    logger.info(f"Platform: {config.platform}")
+    logger.info(f"Inference Device: {config.torch_device}")
 
-    # Start servers and retrieve both HTTP and WebSocket server instances
     http_server, websocket_server = start_servers(config)
 
     start_capture_loop(config, websocket_server)

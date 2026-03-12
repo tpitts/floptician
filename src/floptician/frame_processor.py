@@ -1,16 +1,15 @@
+from __future__ import annotations
+
 import logging
 import os
 import platform
 import sys
 import time
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any
 
 import cv2
 import numpy as np
 
-from floptician.board_processor import BoardState
+from floptician.models import AppConfig, BoardResult, BoardState, CaptureMode, FrameInfo, FrameProcessorState
 
 logger = logging.getLogger(__name__)
 
@@ -20,26 +19,14 @@ if platform.system() != "Windows":
     import termios
 
 
-class FrameProcessorState(Enum):
-    RUNNING = 1
-    FAILED = 2
-
-
-@dataclass
-class FrameInfo:
-    frame_id: int
-    frame: Any
-    capture_time: float
-
-
 class FrameProcessor:
-    def __init__(self, config, obs_client, board_processor, websocket_server):
+    def __init__(self, config: AppConfig, obs_client, board_processor, websocket_server):
         self.config = config
         self.obs_client = obs_client
         self.board_processor = board_processor
         self.websocket_server = websocket_server
 
-        self.target_fps = config["capture"]["fps"]
+        self.target_fps = config.capture.fps
         self.frame_interval = 1 / self.target_fps
 
         self.last_frame_id = 0
@@ -54,15 +41,15 @@ class FrameProcessor:
         self.start_time = time.time()
         self.last_valid_frame_time = self.start_time
 
-        self.first_frame_threshold = 8.0  # 8 seconds threshold for the first frame
-        self.subsequent_frame_threshold = 4.0  # 4 seconds threshold for subsequent frames
+        self.first_frame_threshold = 8.0
+        self.subsequent_frame_threshold = 4.0
         self.is_first_frame = True
 
-        self.debug_mode = config.get("debug", False)
+        self.debug_mode = config.debug
 
         self.previous_frame = None
 
-        if config["platform"] == "Windows":
+        if config.platform == "Windows":
             import msvcrt
 
             self.kbhit = msvcrt.kbhit
@@ -83,15 +70,15 @@ class FrameProcessor:
 
     def capture_frame(self) -> FrameInfo | None:
         try:
-            if self.config["capture"]["mode"] == "obs_websocket":
-                image_data = self.obs_client.capture_frame(self.config["capture"]["selected_webcam"])
+            if self.config.capture.mode == CaptureMode.OBS_WEBSOCKET:
+                image_data = self.obs_client.capture_frame(self.config.capture.selected_webcam)
                 if image_data:
                     nparr = np.frombuffer(image_data, np.uint8)
                     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 else:
                     frame = None
             else:
-                success, frame = self.config["capture"]["camera_manager"].get_frame()
+                success, frame = self.config.capture.camera_manager.get_frame()
                 if not success:
                     frame = None
 
@@ -106,9 +93,8 @@ class FrameProcessor:
             logger.warning("No frame captured")
             return False
 
-        # Check for 50% black or white pixels
         total_pixels = frame.shape[0] * frame.shape[1]
-        black_pixels = np.sum(frame == 0) / 3  # Divide by 3 for RGB channels
+        black_pixels = np.sum(frame == 0) / 3
         white_pixels = np.sum(frame == 255) / 3
 
         if black_pixels / total_pixels > 0.5:
@@ -119,7 +105,6 @@ class FrameProcessor:
             logger.warning("Frame is over 50% white")
             return False
 
-        # Check for frozen frame
         if self.previous_frame is not None and np.array_equal(frame, self.previous_frame):
             logger.warning("Frozen frame detected")
             return False
@@ -127,42 +112,42 @@ class FrameProcessor:
         self.previous_frame = frame.copy()
         return True
 
-    def process_frame(self, frame_info: FrameInfo) -> dict[str, Any] | None:
+    def process_frame(self, frame_info: FrameInfo) -> dict | None:
         try:
             if self.is_valid_frame(frame_info.frame):
                 self.last_valid_frame_time = time.time()
 
                 start_time = time.time()
-                result = self.board_processor.process_frame(frame_info.frame)
+                result: BoardResult = self.board_processor.process_frame(frame_info.frame)
                 processing_time = time.time() - start_time
 
                 self.total_processing_time += processing_time
                 self.frame_count += 1
 
-                if result["state"] == BoardState.SHOWING:
-                    sorted_board = sorted(result["board"], key=lambda card: (card["y"], card["x"]))
-                    card_values = [card["card"] for card in sorted_board]
+                if result.state == BoardState.SHOWING:
+                    sorted_board = sorted(result.board, key=lambda card: (card.y, card.x))
+                    card_values = [card.card for card in sorted_board]
                     logger.debug(f"Stable board: {card_values}")
-                elif result["state"] == BoardState.NOT_SHOWING:
+                elif result.state == BoardState.NOT_SHOWING:
                     logger.debug("No board.")
                 else:
-                    logger.warning(f"Unexpected board state: {result['state']}")
+                    logger.warning(f"Unexpected board state: {result.state}")
 
-                result = self.convert_enums_to_strings(result)
-                result["frame_id"] = frame_info.frame_id
-                result["frame_count"] = self.frame_count
-                result["processing_time"] = processing_time
+                result_dict = result.to_dict()
+                result_dict["frame_id"] = frame_info.frame_id
+                result_dict["frame_count"] = self.frame_count
+                result_dict["processing_time"] = processing_time
 
-                logger.debug(f"Frame {result['frame_id']} | Processing time: {result['processing_time']:.3f}s")
+                logger.debug(f"Frame {result_dict['frame_id']} | Processing time: {processing_time:.3f}s")
 
-                if not self.debug_mode and "debug_info" in result:
-                    del result["debug_info"]
+                if not self.debug_mode and "debug_info" in result_dict:
+                    del result_dict["debug_info"]
 
                 if self.is_first_frame:
                     self.is_first_frame = False
                     logger.info("First frame processed successfully")
 
-                return result
+                return result_dict
             else:
                 gap = time.time() - self.last_valid_frame_time
                 logger.warning(f"Invalid frame detected. Time since last valid frame: {gap:.2f}s")
@@ -172,20 +157,11 @@ class FrameProcessor:
             logger.error(f"Error in frame processing: {e!s}", exc_info=True)
             raise
 
-    def convert_enums_to_strings(self, obj: Any) -> Any:
-        if isinstance(obj, Enum):
-            return obj.value
-        elif isinstance(obj, dict):
-            return {k: self.convert_enums_to_strings(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self.convert_enums_to_strings(item) for item in obj]
-        return obj
-
     def check_for_quit(self):
-        if self.config["platform"] == "Windows":
+        if self.config.platform == "Windows":
             if self.kbhit() and self.getch() == b"q":
-                    logger.info("Quit command received. Shutting down...")
-                    return True
+                logger.info("Quit command received. Shutting down...")
+                return True
         else:
             try:
                 c = sys.stdin.read(1)
@@ -197,15 +173,9 @@ class FrameProcessor:
         return False
 
     def run(self):
-
         try:
             while self.running and self.state == FrameProcessorState.RUNNING:
                 frame_info = self.capture_frame()
-
-                # if self.frame_count > 1 and (time.time() - self.last_valid_frame_time > threshold):
-                #     logger.error(f"No valid frames received for {threshold} seconds. Shutting down.")
-                #     self.state = FrameProcessorState.FAILED
-                #    break
 
                 if frame_info:
                     if frame_info.frame_id > self.last_processed_id:
@@ -221,7 +191,6 @@ class FrameProcessor:
                 if self.check_for_quit():
                     break
 
-                # Maintain target frame rate
                 time_to_next_frame = self.frame_interval - (time.time() % self.frame_interval)
                 if time_to_next_frame > 0:
                     time.sleep(time_to_next_frame)
@@ -237,12 +206,12 @@ class FrameProcessor:
     def shutdown(self):
         logger.info("Initiating shutdown...")
         self.running = False
-        if self.config["capture"]["mode"] == "obs_websocket":
+        if self.config.capture.mode == CaptureMode.OBS_WEBSOCKET:
             self.obs_client.disconnect()
-        elif hasattr(self.config["capture"], "camera_manager"):
-            self.config["capture"]["camera_manager"].release_camera()
+        elif hasattr(self.config.capture, "camera_manager"):
+            self.config.capture.camera_manager.release_camera()
 
-        if self.config["platform"] != "Windows":
+        if self.config.platform != "Windows":
             termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.old_settings)
 
         end_time = time.time()
