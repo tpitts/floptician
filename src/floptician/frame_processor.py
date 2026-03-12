@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from floptician.models import AppConfig, BoardResult, BoardState, CaptureMode, FrameInfo, FrameProcessorState
+from floptician.protocols import MessageBroadcaster, OBSProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,9 @@ if platform.system() != "Windows":
 
 
 class FrameProcessor:
-    def __init__(self, config: AppConfig, obs_client, board_processor, websocket_server):
+    def __init__(
+        self, config: AppConfig, obs_client: OBSProtocol, board_processor, websocket_server: MessageBroadcaster
+    ):
         self.config = config
         self.obs_client = obs_client
         self.board_processor = board_processor

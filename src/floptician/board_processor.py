@@ -12,6 +12,7 @@ from floptician.models import (
     CommunityCard,
     TransitionState,
 )
+from floptician.protocols import DetectorProtocol
 from floptician.yolo_processor import YOLOProcessor
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,8 @@ logger = logging.getLogger(__name__)
 class BoardProcessor:
     MAX_HISTORY_SIZE = 1000
 
-    def __init__(self, config: AppConfig):
-        self.yolo_processor = YOLOProcessor(config.yolo)
+    def __init__(self, config: AppConfig, detector: DetectorProtocol | None = None):
+        self.yolo_processor: DetectorProtocol = detector or YOLOProcessor(config.yolo)
         self.config = config.board_processor
         self.community_card_detector = CommunityCardDetector(self.config)
         self.frame_id = 0
