@@ -1,0 +1,11 @@
+debug: false
+host: 'localhost'
+
+yolo:
+  model: 'nonexistent_model.pt'
+  confidence_threshold: 5.0
+  overlap_threshold: -1.0
+
+capture:
+  mode: 'invalid_mode'
+  fps: -1
