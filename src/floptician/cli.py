@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from floptician.config_utils import load_config, validate_config
+from floptician.logging_config import configure_logging
 from floptician.models import AppConfig, CaptureMode
 
 app = typer.Typer(
@@ -38,27 +39,6 @@ $$ |      $$ |\$$$$$$  |$$$$$$$  | \$$$$  |$$ |\$$$$$$$\ $$ |\$$$$$$$ |$$ |  $$ 
 [/bold green]"""
 
 
-def _configure_logging(debug_mode: bool) -> None:
-    logging_level = logging.DEBUG if debug_mode else logging.INFO
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging_level)
-
-    if root_logger.hasHandlers():
-        root_logger.handlers.clear()
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging_level)
-    stream_handler.setFormatter(
-        logging.Formatter("%(asctime)s | %(levelname)s | %(module)s:%(lineno)d | %(message)s", datefmt="%H:%M:%S")
-    )
-    root_logger.addHandler(stream_handler)
-
-    logging.getLogger("ultralytics").setLevel(logging.ERROR)
-    logging.getLogger("obsws_python").setLevel(logging.ERROR)
-    logging.getLogger("comtypes").setLevel(logging.ERROR)
-
-
 def _determine_torch_device() -> str:
     import torch
 
@@ -70,7 +50,7 @@ def _determine_torch_device() -> str:
         return "cpu"
 
 
-def _initialize_config(config_path: str | None, debug: bool) -> AppConfig:
+def _initialize_config(config_path: str | None, debug: bool, json_log: bool = False) -> AppConfig:
     try:
         config = load_config(config_path)
     except (FileNotFoundError, ValueError) as e:
@@ -79,7 +59,7 @@ def _initialize_config(config_path: str | None, debug: bool) -> AppConfig:
 
     if debug:
         config.debug = True
-    _configure_logging(config.debug)
+    configure_logging(debug=config.debug, json_output=json_log)
 
     config.platform = platform.system()
 
@@ -121,11 +101,13 @@ def _select_input(inputs, input_type: str):
 def run(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to the config YAML file"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    json_log: bool = typer.Option(False, "--json-log", help="Output logs as JSON (for machine parsing)"),
 ) -> None:
     """Run the Floptician card detection system."""
-    rprint(BANNER)
+    if not json_log:
+        rprint(BANNER)
 
-    app_config = _initialize_config(config, debug)
+    app_config = _initialize_config(config, debug, json_log=json_log)
 
     if app_config.debug:
         logger.debug("Debug mode is enabled.")
