@@ -7,6 +7,7 @@ from collections import deque
 from floptician.community_card_detector import CommunityCardDetector
 from floptician.models import (
     AppConfig,
+    BoardConfiguration,
     BoardResult,
     BoardState,
     CommunityCard,
@@ -31,6 +32,7 @@ class BoardProcessor:
         self.detection_history: deque[list[CommunityCard]] = deque(maxlen=self.MAX_HISTORY_SIZE)
         self.last_state_change = time.time()
         self.stable_board: list[CommunityCard] = []
+        self.current_configuration = BoardConfiguration.NO_BOARD
         self.transition_start_time: float | None = None
 
     def process_frame(self, frame) -> BoardResult:
@@ -38,7 +40,8 @@ class BoardProcessor:
         start_time = time.time()
         try:
             filtered_detections = self.yolo_processor.process_frame(frame) or []
-            detected_board = self.community_card_detector.detect_community_cards(filtered_detections)
+            detected_board, configuration = self.community_card_detector.detect_community_cards(filtered_detections)
+            self.current_configuration = configuration
             sorted_board = sorted(detected_board, key=lambda card: (card.y, card.x))
             card_values = [card.card for card in sorted_board]
             logger.debug(f"Detected board: {card_values}")
@@ -53,6 +56,7 @@ class BoardProcessor:
                 timestamp=time.time(),
                 state=new_state,
                 board=updated_displayed_board,
+                configuration=self.current_configuration,
                 debug_info={
                     "detections": [{"card": d.card, "confidence": d.confidence} for d in filtered_detections],
                     "processing_time": processing_time,

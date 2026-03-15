@@ -1,0 +1,16 @@
+{
+  "configuration": "CHIHUAHUA",
+  "cards": [
+    {"card": "3c", "x": 1, "y": 1},
+    {"card": "9h", "x": 2, "y": 1},
+    {"card": "5s", "x": 3, "y": 1},
+    {"card": "6h", "x": 4, "y": 1},
+    {"card": "Jh", "x": 6, "y": 1},
+    {"card": "Td", "x": 5, "y": 2},
+    {"card": "Ks", "x": 1, "y": 3},
+    {"card": "Kh", "x": 2, "y": 3},
+    {"card": "4d", "x": 3, "y": 3},
+    {"card": "2c", "x": 4, "y": 3},
+    {"card": "2h", "x": 6, "y": 3}
+  ]
+}

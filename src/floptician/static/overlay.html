@@ -39,12 +39,11 @@
             top: var(--vertical-padding);
             left: var(--horizontal-padding);
             width: calc(6 * var(--card-width) + 5 * var(--gap));
-            height: calc(var(--card-height) * 2 + var(--gap));
+            height: auto;
             display: grid;
             grid-template-columns: repeat(6, var(--card-width));
-            grid-template-rows: var(--card-height) var(--card-height);
+            grid-template-rows: var(--card-height) auto var(--card-height);
             gap: var(--gap);
-            position: relative;  /* Add positioning context for absolute positioned children */
         }
         .card {
             width: var(--card-width);
@@ -229,25 +228,49 @@
                     }
 
                     // Prepare the new styles
+                    const config = data.configuration || '';
                     const newStyles = {
                         gridColumnStart: cardInfo.x.toString(),
                         transition: 'all 0.3s ease'
                     };
 
-                    if (cardInfo.y === 2) {
-                        // Middle pseudo-row
+                    const isRunItTwice = config.startsWith('RUN_IT_TWICE');
+
+                    if (cardInfo.y === 2 && config === 'CHIHUAHUA') {
+                        // Chihuahua card spans rows 1-3
                         Object.assign(newStyles, {
-                            gridRowStart: '1',
-                            gridRowEnd: '3',
-                            alignSelf: 'center',
-                            zIndex: '10'
+                            gridRowStart: '1', gridRowEnd: '4',
+                            alignSelf: 'center', zIndex: '10', transform: 'none'
+                        });
+                    } else if (isRunItTwice && cardInfo.y === 1) {
+                        // Top runout: same grid row as main, shifted 50% up
+                        Object.assign(newStyles, {
+                            gridRowStart: '2', alignSelf: 'start',
+                            transform: 'translateY(-50%)', zIndex: '1'
+                        });
+                    } else if (isRunItTwice && cardInfo.y === 3) {
+                        // Bottom runout: same grid row as main, shifted 50% down
+                        Object.assign(newStyles, {
+                            gridRowStart: '2', alignSelf: 'start',
+                            transform: 'translateY(50%)', zIndex: '1'
+                        });
+                    } else if (isRunItTwice && cardInfo.y === 2) {
+                        // Main board in RIT: stays in row 2, renders above runouts
+                        Object.assign(newStyles, {
+                            gridRowStart: '2', alignSelf: 'start',
+                            transform: 'none', zIndex: '2'
+                        });
+                    } else if (cardInfo.y === 2) {
+                        // Normal middle row
+                        Object.assign(newStyles, {
+                            gridRowStart: '2', alignSelf: 'start',
+                            transform: 'none', zIndex: '1'
                         });
                     } else {
-                        // Top or bottom row
+                        // y=1 → row 1, y=3 → row 3 (non-RIT)
                         Object.assign(newStyles, {
-                            gridRowStart: cardInfo.y === 1 ? '1' : '2',
-                            alignSelf: 'start',
-                            zIndex: '1'
+                            gridRowStart: cardInfo.y === 1 ? '1' : '3',
+                            alignSelf: 'start', transform: 'none', zIndex: '1'
                         });
                     }
 

@@ -57,4 +57,5 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring external services",
+    "screenshot: marks tests requiring YOLO model file (deselect with '-m \"not screenshot\"')",
 ]

@@ -32,6 +32,8 @@ class TestEnums:
         assert BoardConfiguration.SINGLE_ROW is not None
         assert BoardConfiguration.TWO_ROWS is not None
         assert BoardConfiguration.CHIHUAHUA is not None
+        assert BoardConfiguration.RUN_IT_TWICE_FLOP is not None
+        assert BoardConfiguration.RUN_IT_TWICE_TURN is not None
 
 
 class TestCardDetection:
@@ -65,11 +67,13 @@ class TestBoardResult:
             timestamp=100.0,
             state=BoardState.SHOWING,
             board=[CommunityCard(card="Ah", x=1, y=1, confidence=0.95)],
+            configuration=BoardConfiguration.SINGLE_ROW,
             debug_info={"frame_id": 1},
         )
         d = result.to_dict()
         assert d["timestamp"] == 100.0
         assert d["state"] == "Showing"
+        assert d["configuration"] == "SINGLE_ROW"
         assert len(d["board"]) == 1
         assert d["board"][0]["card"] == "Ah"
         assert d["debug_info"]["frame_id"] == 1
@@ -83,6 +87,7 @@ class TestBoardResult:
         d = result.to_dict()
         assert d["board"] == []
         assert d["state"] == "Not Showing"
+        assert d["configuration"] == "NO_BOARD"
 
 
 class TestAppConfig:

@@ -1,0 +1,11 @@
+{
+  "configuration": "TWO_ROWS",
+  "cards": [
+    {"card": "As", "x": 1, "y": 1},
+    {"card": "7h", "x": 2, "y": 1},
+    {"card": "5c", "x": 3, "y": 1},
+    {"card": "4c", "x": 1, "y": 3},
+    {"card": "4h", "x": 2, "y": 3},
+    {"card": "3c", "x": 3, "y": 3}
+  ]
+}

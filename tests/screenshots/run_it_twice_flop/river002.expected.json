@@ -1,0 +1,12 @@
+{
+  "configuration": "RUN_IT_TWICE_FLOP",
+  "cards": [
+    {"card": "Ts", "x": 4, "y": 1},
+    {"card": "7c", "x": 5, "y": 1},
+    {"card": "8c", "x": 1, "y": 2},
+    {"card": "Ac", "x": 2, "y": 2},
+    {"card": "9h", "x": 3, "y": 2},
+    {"card": "6h", "x": 4, "y": 3},
+    {"card": "2d", "x": 5, "y": 3}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "configuration": "SINGLE_ROW",
+  "cards": [
+    {"card": "6s", "x": 1, "y": 1},
+    {"card": "Td", "x": 2, "y": 1},
+    {"card": "8d", "x": 3, "y": 1},
+    {"card": "8h", "x": 4, "y": 1}
+  ]
+}

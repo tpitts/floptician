@@ -1,0 +1,11 @@
+{
+  "configuration": "RUN_IT_TWICE_TURN",
+  "cards": [
+    {"card": "2s", "x": 5, "y": 1},
+    {"card": "2c", "x": 1, "y": 2},
+    {"card": "4h", "x": 2, "y": 2},
+    {"card": "5h", "x": 3, "y": 2},
+    {"card": "Jc", "x": 4, "y": 2},
+    {"card": "9c", "x": 5, "y": 3}
+  ]
+}

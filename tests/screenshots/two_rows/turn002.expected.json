@@ -1,0 +1,13 @@
+{
+  "configuration": "TWO_ROWS",
+  "cards": [
+    {"card": "8d", "x": 1, "y": 1},
+    {"card": "As", "x": 2, "y": 1},
+    {"card": "9d", "x": 3, "y": 1},
+    {"card": "3s", "x": 4, "y": 1},
+    {"card": "Ah", "x": 1, "y": 3},
+    {"card": "Kd", "x": 2, "y": 3},
+    {"card": "Qd", "x": 3, "y": 3},
+    {"card": "2s", "x": 4, "y": 3}
+  ]
+}

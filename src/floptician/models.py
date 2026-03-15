@@ -22,6 +22,8 @@ class BoardConfiguration(Enum):
     SINGLE_ROW = auto()
     TWO_ROWS = auto()
     CHIHUAHUA = auto()
+    RUN_IT_TWICE_FLOP = auto()
+    RUN_IT_TWICE_TURN = auto()
 
 
 class CaptureMode(Enum):
@@ -32,6 +34,25 @@ class CaptureMode(Enum):
 class FrameProcessorState(Enum):
     RUNNING = 1
     FAILED = 2
+
+
+# ── Layout descriptors ────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RowSpec:
+    role: str  # e.g. "main", "runout", "chihuahua"
+    valid_card_counts: tuple[int, ...]
+    y_coordinate: int
+
+
+@dataclass(frozen=True)
+class LayoutDescriptor:
+    name: str
+    row_specs: tuple[RowSpec, ...]
+    total_cards_range: tuple[int, int]  # (min, max) inclusive
+    min_detection_cards: int
+    priority: int  # higher = checked first
 
 
 # ── Config dataclasses ─────────────────────────────────────────────────────────
@@ -152,12 +173,14 @@ class BoardResult:
     timestamp: float
     state: BoardState
     board: list[CommunityCard]
+    configuration: BoardConfiguration = BoardConfiguration.NO_BOARD
     debug_info: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
             "timestamp": self.timestamp,
             "state": self.state.value,
+            "configuration": self.configuration.name,
             "board": [{"card": c.card, "x": c.x, "y": c.y, "confidence": c.confidence} for c in self.board],
             "debug_info": self.debug_info,
         }

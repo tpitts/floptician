@@ -1,0 +1,10 @@
+{
+  "configuration": "SINGLE_ROW",
+  "cards": [
+    {"card": "6h", "x": 1, "y": 1},
+    {"card": "Kh", "x": 2, "y": 1},
+    {"card": "9h", "x": 3, "y": 1},
+    {"card": "4d", "x": 4, "y": 1},
+    {"card": "As", "x": 5, "y": 1}
+  ]
+}
