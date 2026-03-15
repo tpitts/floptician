@@ -100,8 +100,8 @@ class FrameProcessor:
         black_pixels = np.sum(frame == 0) / 3
         white_pixels = np.sum(frame == 255) / 3
 
-        if black_pixels / total_pixels > 0.5:
-            logger.warning("Frame is over 50% black")
+        if black_pixels / total_pixels > 0.9:
+            logger.warning("Frame is over 90% black")
             return False
 
         if white_pixels / total_pixels > 0.5:

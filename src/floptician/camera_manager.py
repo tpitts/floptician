@@ -26,6 +26,13 @@ def is_windows():
     return platform.system() == "Windows"
 
 
+def _get_cap_prop_fps():
+    fps_prop = getattr(cv2, "CAP_PROP_FPS", None)
+    if fps_prop is not None:
+        return fps_prop
+    return getattr(cv2, "CAP_PROP_FRAME_FPS", None)
+
+
 # --- FFmpeg Discovery ---
 def _find_ffmpeg():
     exe = shutil.which("ffmpeg")
@@ -237,7 +244,11 @@ class CameraManager:
             if ok:
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-                cap.set(cv2.CAP_PROP_FRAME_FPS, fps)
+                fps_prop = _get_cap_prop_fps()
+                if fps_prop is not None:
+                    cap.set(fps_prop, fps)
+                else:
+                    logger.warning("OpenCV FPS capture property is unavailable; skipping FPS configuration")
         self.cap = cap if ok else None
         return ok
 

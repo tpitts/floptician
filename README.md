@@ -35,7 +35,7 @@ Dependencies
 Repo Layout
 -----------
 
-- `app/`: runtime modules used by `main.py`
+- `src/floptician/`: core application package
 - `scripts/`: utility scripts for capture experiments, overlays, dataset generation, and data prep
 - `models/`: tracked runtime model weights
 - `resources/`: committed assets plus a large amount of local training/data material
