@@ -72,9 +72,31 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM --- Install PyTorch with CUDA ---
+echo.
+nvidia-smi >nul 2>&1
+if errorlevel 1 (
+    echo No NVIDIA GPU detected — installing CPU-only PyTorch.
+    echo Detection will work but will be slower.
+    echo.
+    pip install torch torchvision
+) else (
+    echo NVIDIA GPU detected — installing PyTorch with CUDA support...
+    echo This download is ~2.5 GB, it may take a while.
+    echo.
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+)
+if errorlevel 1 (
+    echo.
+    echo ERROR: Failed to install PyTorch.
+    echo Check the error messages above.
+    pause
+    exit /b 1
+)
+
 REM --- Install dependencies ---
 echo.
-echo Installing Floptician and dependencies (this may take a few minutes)...
+echo Installing Floptician and dependencies...
 pip install -e ".[windows]"
 if errorlevel 1 (
     echo.
@@ -101,7 +123,7 @@ echo   Setup complete!
 echo ========================================
 echo.
 echo Next steps:
-echo   1. Set up OBS (see SETUP.md Steps 5-7)
+echo   1. Set up OBS (see SETUP.md Steps 6-8)
 echo   2. Double-click run.bat to start
 echo.
 pause

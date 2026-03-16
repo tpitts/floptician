@@ -28,7 +28,21 @@ This guide walks you through setting up Floptician on a fresh Windows machine. N
    ```
    You should see something like `git version 2.x.x.windows.1`.
 
-## Step 3: Clone the repo
+## Step 3: NVIDIA GPU drivers (for fast detection)
+
+Floptician uses your NVIDIA GPU to detect cards in real time. Without it, detection runs on CPU and is much slower.
+
+1. Right-click the Desktop and look for **"NVIDIA Control Panel"** or check if there's an NVIDIA icon in your system tray — if either exists, your drivers are already installed
+2. If not, go to <https://www.nvidia.com/drivers> and download the latest driver for your GPU
+3. To verify, open a Command Prompt and run:
+   ```
+   nvidia-smi
+   ```
+   You should see a table showing your GPU name, driver version, and CUDA version. The CUDA version should be **12.4 or higher**.
+
+> **No NVIDIA GPU?** Floptician still works — it just falls back to CPU, which is slower. You can skip this step.
+
+## Step 4: Clone the repo
 
 Open a Command Prompt and run:
 
@@ -41,7 +55,7 @@ This downloads the project to your Desktop. It's about **300 MB** because it inc
 
 When it's done you'll have a `floptician` folder on your Desktop.
 
-## Step 4: Run setup.bat
+## Step 5: Run setup.bat
 
 1. Open the `floptician` folder on your Desktop
 2. **Double-click `setup.bat`**
@@ -49,7 +63,7 @@ When it's done you'll have a `floptician` folder on your Desktop.
 4. Wait until you see **"Setup complete!"**
 5. Press any key to close the window
 
-## Step 5: Set up OBS — Video Source + Virtual Camera
+## Step 6: Set up OBS — Video Source + Virtual Camera
 
 Floptician doesn't read from the physical webcam directly. Instead, OBS captures the webcam and outputs a **Virtual Camera** that Floptician reads from. This lets you position and crop the camera feed in OBS.
 
@@ -63,18 +77,18 @@ Floptician doesn't read from the physical webcam directly. Instead, OBS captures
 
 The Virtual Camera is now active — Floptician will use it as its input.
 
-## Step 6: Set up OBS WebSocket
+## Step 7: Set up OBS WebSocket
 
 Floptician sends the card overlay back into OBS through a WebSocket connection. This is built into OBS — you just need to enable it.
 
 1. In OBS, go to **Tools > WebSocket Server Settings**
 2. Check **Enable WebSocket Server**
 3. Note whether **Enable Authentication** is checked:
-   - If authentication is **off**: you're done, skip to Step 8
-   - If authentication is **on**: note the password shown (or click "Show Connect Info" to see it), then continue to Step 7
+   - If authentication is **off**: you're done, skip to Step 9
+   - If authentication is **on**: note the password shown (or click "Show Connect Info" to see it), then continue to Step 8
 4. Click **OK**
 
-## Step 7: Edit config.yaml (only if OBS has a WebSocket password)
+## Step 8: Edit config.yaml (only if OBS has a WebSocket password)
 
 If OBS WebSocket authentication is enabled:
 
@@ -91,7 +105,7 @@ If OBS WebSocket authentication is enabled:
 
 If OBS WebSocket authentication is disabled, skip this step — the default empty password works fine.
 
-## Step 8: Run the app
+## Step 9: Run the app
 
 1. **Double-click `run.bat`**
 2. The app will list available cameras — type the number for **"OBS Virtual Camera"** and press Enter
@@ -132,15 +146,30 @@ Python wasn't added to PATH during installation. The easiest fix:
 
 ### No cameras found
 
-- Make sure OBS is running and **Virtual Camera is started** (Step 5)
+- Make sure OBS is running and **Virtual Camera is started** (Step 6)
 - Try restarting OBS, then run `run.bat` again
 
 ### OBS connection failed / "Could not connect to OBS"
 
 - Make sure OBS is running
-- Check that WebSocket Server is enabled (Step 6)
-- If you set a password in OBS, make sure it matches `config.yaml` (Step 7)
+- Check that WebSocket Server is enabled (Step 7)
+- If you set a password in OBS, make sure it matches `config.yaml` (Step 8)
 - Make sure the port in `config.yaml` matches OBS (default is `4455`)
+
+### Detection is very slow / not using GPU
+
+If setup.bat said "No NVIDIA GPU detected" but you do have an NVIDIA GPU:
+
+1. Make sure your NVIDIA drivers are up to date (Step 3)
+2. Open a Command Prompt and run `nvidia-smi` — if it's not found, your drivers aren't installed
+3. After fixing drivers, re-run `setup.bat` — it will reinstall PyTorch with CUDA
+
+To check if PyTorch is using your GPU, open a Command Prompt in the floptician folder and run:
+```
+venv\Scripts\activate
+python -c "import torch; print(torch.cuda.is_available())"
+```
+This should print `True`. If it prints `False`, PyTorch was installed without CUDA — re-run `setup.bat`.
 
 ### Model files missing / tiny .pt files / detection not working
 
