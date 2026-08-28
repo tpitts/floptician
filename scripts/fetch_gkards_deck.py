@@ -31,8 +31,16 @@ SUITS = {"spad": "s", "hear": "h", "club": "c", "diam": "d"}
 RANKS = {"A": "A", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6",
          "7": "7", "8": "8", "9": "9", "10": "T", "J": "J", "Q": "Q", "K": "K"}
 
-# Standard poker card corner radius is ~3.5mm on a 63mm-wide card
-CORNER_RADIUS_FRAC = 0.055
+# Fallback corner radius when it can't be measured (fraction of card width)
+CORNER_RADIUS_FRAC_DEFAULT = 0.065
+# How far in from each frame border the card edge may plausibly sit
+MAX_MARGIN_FRAC = 0.05
+# Mean Sobel response a column/row must reach to count as the card's edge line
+EDGE_GRADIENT_MIN = 8.0
+# Color distance from scanner background that counts as "card"
+BG_DIST_THRESH = 20.0
+# Shave this many px off every side so edge shadow/fringe lands outside the mask
+EDGE_INSET_PX = 2
 
 
 def download(url: str, dest: Path) -> bool:
@@ -51,27 +59,96 @@ def download(url: str, dest: Path) -> bool:
     return True
 
 
-def rounded_corner_alpha(width: int, height: int) -> np.ndarray:
+def _edge_offset(grad_means: np.ndarray) -> int:
+    """Index just inside the strongest gradient line near a border, or 0 if none."""
+    if grad_means.size == 0:
+        return 0
+    peak = int(np.argmax(grad_means))
+    if grad_means[peak] < EDGE_GRADIENT_MIN:
+        return 0
+    return peak + 2
+
+
+def tight_crop(bgr: np.ndarray) -> np.ndarray:
+    """Crop away the scanner-background margin around the card.
+
+    The card edge shows up as a line of strong gradient (shadow/outline) close to
+    each frame border, even when card and background are both near-white. Only the
+    middle band of each side is sampled so the corner curvature doesn't dilute it.
+    """
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    h, w = gray.shape
+    mx = max(3, int(w * MAX_MARGIN_FRAC))
+    my = max(3, int(h * MAX_MARGIN_FRAC))
+    rows = slice(int(h * 0.2), int(h * 0.8))
+    cols = slice(int(w * 0.2), int(w * 0.8))
+    gx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
+    gy = np.abs(cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3))
+    left = _edge_offset(gx[rows, :mx].mean(axis=0))
+    right = _edge_offset(gx[rows, w - mx:].mean(axis=0)[::-1])
+    top = _edge_offset(gy[:my, cols].mean(axis=1))
+    bottom = _edge_offset(gy[h - my:, cols].mean(axis=1)[::-1])
+    return bgr[top:h - bottom, left:w - right]
+
+
+def estimate_corner_radius(bgr: np.ndarray) -> float:
+    """Measure the card's corner radius from the background wedges at its corners.
+
+    Walks each corner's diagonal until the pixel stops matching that corner's
+    background color; for a quarter-circle of radius r the diagonal crosses the
+    arc at r * (1 - 1/sqrt(2)) from the corner. Median of the usable corners.
+    """
+    h, w = bgr.shape[:2]
+    p = max(3, min(h, w) // 60)
+    reach = int(min(h, w) * 0.25)
+    corners = [(0, 0, 1, 1), (0, w - 1, 1, -1), (h - 1, 0, -1, 1), (h - 1, w - 1, -1, -1)]
+    radii = []
+    for y0, x0, dy, dx in corners:
+        patch = bgr[y0:y0 + dy * p:dy, x0:x0 + dx * p:dx].reshape(-1, 3)
+        bg = np.median(patch, axis=0)
+        for i in range(reach):
+            px = bgr[y0 + dy * i, x0 + dx * i].astype(np.float32)
+            if np.linalg.norm(px - bg) > BG_DIST_THRESH:
+                if i >= 3:  # 0-2 px means dust or no measurable wedge
+                    radii.append(i / (1 - 1 / np.sqrt(2)))
+                break
+    if not radii:
+        return CORNER_RADIUS_FRAC_DEFAULT * min(w, h)
+    r = float(np.median(radii))
+    return float(np.clip(r, 0.04 * min(w, h), 0.18 * min(w, h)))
+
+
+def rounded_corner_alpha(width: int, height: int, radius: float, inset: int = EDGE_INSET_PX) -> np.ndarray:
     """Antialiased rounded-rectangle alpha mask (drawn at 4x and downsampled)."""
     scale = 4
-    radius = int(round(min(width, height) * CORNER_RADIUS_FRAC)) * scale
     mask = Image.new("L", (width * scale, height * scale), 0)
     draw = ImageDraw.Draw(mask)
-    draw.rounded_rectangle([0, 0, width * scale - 1, height * scale - 1], radius=radius, fill=255)
+    draw.rounded_rectangle(
+        [inset * scale, inset * scale, (width - inset) * scale - 1, (height - inset) * scale - 1],
+        radius=int(round(radius * scale)), fill=255)
     mask = mask.resize((width, height), Image.LANCZOS)
     arr = np.array(mask)
     arr[arr < 8] = 0  # kill downsampling ringing so corners are fully transparent
     return arr
 
 
-def cutout_card(src: Path, dest: Path) -> str:
-    """Convert a gkards scan JPEG to a transparent PNG.
+def card_to_rgba(bgr: np.ndarray) -> np.ndarray:
+    """Shared finishing step: measure the corner radius and apply the alpha mask."""
+    h, w = bgr.shape[:2]
+    radius = estimate_corner_radius(bgr)
+    rgba = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA)
+    rgba[:, :, 3] = rounded_corner_alpha(w, h, radius)
+    return rgba
 
-    gkards scans are already tightly cropped to the card, so the whole frame is
-    the card face; only the corners (and any sliver of scanner background) need
-    to be made transparent, which the rounded-rectangle alpha mask handles.
-    Contour-based detection was tried and rejected: white card borders blend
-    into the scan background, so it locks onto the inner artwork and over-crops.
+
+def cutout_card(src: Path, dest: Path) -> str:
+    """Convert a gkards scan JPEG to a tightly-cropped transparent PNG.
+
+    gkards scans are cropped close to the card but keep a few pixels of scanner
+    background on each side; tight_crop removes that, then the alpha mask (with
+    per-card measured corner radius) makes the corners transparent. Full contour
+    detection was tried and rejected: white card borders blend into the scan
+    background, so it locks onto the inner artwork and over-crops.
 
     Returns a status string: 'ok' or 'bad-aspect' (result doesn't look card-shaped).
     """
@@ -79,15 +156,14 @@ def cutout_card(src: Path, dest: Path) -> str:
     if bgr is None:
         raise ValueError(f"could not read {src}")
 
+    bgr = tight_crop(bgr)
     if bgr.shape[1] > bgr.shape[0]:  # cards are portrait
         bgr = cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)
 
     h, w = bgr.shape[:2]
     status = "ok" if 0.55 <= w / h <= 0.85 else "bad-aspect"
 
-    rgba = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA)
-    rgba[:, :, 3] = rounded_corner_alpha(w, h)
-    Image.fromarray(rgba).save(dest)
+    Image.fromarray(card_to_rgba(bgr)).save(dest)
     return status
 
 
