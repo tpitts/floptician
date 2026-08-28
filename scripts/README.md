@@ -91,6 +91,7 @@ python scripts/convert.py
 
 | Script | Description |
 |--------|-------------|
+| `fetch_gkards_deck.py` | Downloads a deck's card scans from gkards.com and converts them to transparent PNGs in `resources/decks/` (e.g. `python scripts/fetch_gkards_deck.py 000454 kem-deck-1`) |
 | `sam_folder.py` | SAM2-based mask extraction from scanned card sheets |
 | `sam_extract.py` | SAM2 extraction with contour-based processing |
 | `fast_sam_extract.py` | FastSAM-based extraction (faster, less precise) |
