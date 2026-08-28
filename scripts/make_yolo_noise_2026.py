@@ -35,7 +35,7 @@ OVEREXPRESS_CARDS = {'Jc', 'Jd', 'Jh', 'Js', 'Qc', 'Qd', 'Qh', 'Qs',
 CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
 
 # Input Paths
-BACKGROUND_DIR = resources_path("background")
+BACKGROUND_DIR = resources_path("training_background")
 DECKS_DIR = resources_path("decks")
 TRAINING_BG_DIR = resources_path("training_background")
 TRUTH_DIR = resources_path("truth-v1")
