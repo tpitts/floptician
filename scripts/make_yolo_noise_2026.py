@@ -1,3 +1,4 @@
+import argparse
 import os
 import random
 import math
@@ -578,7 +579,7 @@ def create_data_yaml(yaml_path, dataset_dir, class_names):
     with open(yaml_path, 'w') as f:
         yaml.dump(data, f, default_flow_style=False)
 
-def main():
+def main(num_images=NUM_IMAGES, num_val_images=NUM_VAL_IMAGES):
     backgrounds = load_images(BACKGROUND_DIR)
     if not backgrounds:
         print("Error: No background images found.")
@@ -607,7 +608,7 @@ def main():
           f"({len(OVEREXPRESS_CARDS)} card types at 2x)")
 
     total_combinations = len(CARD_SIZES) * len(BLUR_FACTORS)
-    images_per_combination = NUM_IMAGES // total_combinations
+    images_per_combination = num_images // total_combinations
 
     # Generate all image metadata first
     all_images = []
@@ -621,7 +622,7 @@ def main():
                 all_images.append((card_size, blur_factor, card_sequence[i*CARDS_PER_IMAGE:(i+1)*CARDS_PER_IMAGE]))
 
     # Randomly select validation images
-    val_indices = set(random.sample(range(len(all_images)), NUM_VAL_IMAGES))
+    val_indices = set(random.sample(range(len(all_images)), num_val_images))
 
     # Generate images using thread pool
     total = len(all_images)
@@ -669,8 +670,8 @@ def main():
     # Create data.yaml
     create_data_yaml(DATASET_DIR / 'data.yaml', DATASET_DIR, CARD_CLASSES)
 
-    num_train = len(all_images) - NUM_VAL_IMAGES
-    print(f"\nDone! {len(all_images)} synthetic images generated ({num_train} train / {NUM_VAL_IMAGES} val)")
+    num_train = len(all_images) - num_val_images
+    print(f"\nDone! {len(all_images)} synthetic images generated ({num_train} train / {num_val_images} val)")
     print(f"Output: {OUTPUT_DIR}")
     print(f"\nReady to train:")
     print(f'yolo task=detect mode=train model=yolov8l.pt data="{DATASET_DIR / "data.yaml"}" '
@@ -678,4 +679,10 @@ def main():
           f'flipud=0 fliplr=0 mixup=0 copy_paste=0 patience=20 mosaic=0 scale=0.3 batch=-1 hsv_h=0.045')
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Generate synthetic YOLO training data from resources/decks.")
+    parser.add_argument("--num-images", type=int, default=NUM_IMAGES,
+                        help=f"synthetic image budget, spread over card-size x blur combinations (default {NUM_IMAGES})")
+    parser.add_argument("--num-val", type=int, default=NUM_VAL_IMAGES,
+                        help=f"how many of those images go to the val split (default {NUM_VAL_IMAGES})")
+    args = parser.parse_args()
+    main(num_images=args.num_images, num_val_images=args.num_val)
