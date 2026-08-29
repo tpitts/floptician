@@ -31,6 +31,26 @@ MAX_OVERLAP = 0.03
 OVEREXPRESS_CARDS = {'Jc', 'Jd', 'Jh', 'Js', 'Qc', 'Qd', 'Qh', 'Qs',
                      'Kc', 'Kd', 'Kh', 'Ks', 'As'}
 
+# Deployment-relevant decks are sampled more often; unlisted decks weight 1.0.
+# Scale NUM_IMAGES up alongside these so low-weight decks keep their absolute exposure.
+DECK_WEIGHTS = {
+    'kem-deck-1': 2.0, 'kem-deck-2': 2.0, 'kem-deck-3': 2.0,
+    'angel-deck-1': 2.0, 'angel-deck-2': 2.0, 'angel-deck-3': 2.0,
+    'faded-spades-camera-1': 1.5, 'faded-spades-camera-2': 1.5,
+    'faded-spade-old-school-scanned': 1.5,
+    'copag_wsop_2022': 1.5, 'dal-negro-deck-1': 1.5, 'dal-negro-deck-2': 1.5,
+}
+
+# Per-card photometric augmentation (calibrated against real failure crops):
+# washed-out pale cards, off-white-balance lighting, broad specular glare.
+FADE_PROB = 0.35
+FADE_RANGE = (0.10, 0.45)
+GAMMA_RANGE = (0.65, 1.30)
+WB_GAIN_RANGE = (0.88, 1.12)
+BIG_GLARE_PROB = 0.25
+BIG_GLARE_ALPHA = (0.15, 0.50)
+BIG_GLARE_COVER = (0.30, 1.00)
+
 # Define a named tuple to hold card and rotation information
 CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
 
@@ -282,13 +302,18 @@ def generate_rotation_sequence(num_cards, total_images, cards_per_image):
     return rotations
 
 def build_weighted_card_pool(all_decks):
-    """Build a weighted card pool where over-expressed cards appear 2x."""
+    """Weighted card pool: deck weight (DECK_WEIGHTS) x rank weight (OVEREXPRESS 2x).
+
+    all_decks entries are (deck_name, cards). Fractional weights are resolved
+    probabilistically per card so 1.5 means "half the cards get a second copy".
+    """
     pool = []
-    for deck in all_decks:
+    for deck_name, deck in all_decks:
+        deck_w = DECK_WEIGHTS.get(deck_name, 1.0)
         for card in deck:
-            pool.append(card)
-            if card['name'] in OVEREXPRESS_CARDS:
-                pool.append(card)  # Add a second copy for 2x weight
+            n = deck_w * (2 if card['name'] in OVEREXPRESS_CARDS else 1)
+            copies = int(n) + (1 if random.random() < n - int(n) else 0)
+            pool.extend([card] * copies)
     return pool
 
 def prepare_card_sequence_with_rotations(weighted_pool, total_images, cards_per_image):
@@ -341,6 +366,51 @@ def generate_yolo_annotation(card_name, bounding_box, image_size):
     width = w / image_size[0]
     height = h / image_size[1]
     return f"{class_id} {x_center} {y_center} {width} {height}"
+
+def apply_photometrics(image):
+    """Per-card lighting effects: white balance, gamma, uniform fade, large soft glare.
+
+    Synthesizes the real-world failure conditions measured on truth-v2: washed-out
+    low-contrast cards (suit confusion), color-tinted lighting, and broad specular
+    wash — none of which the small-circle glare or additive gradient can produce.
+    """
+    img = image.copy()
+    rgb = img[:, :, :3].astype(np.float32)
+    mask = (img[:, :, 3] > 0) if img.shape[2] == 4 else np.ones(img.shape[:2], dtype=bool)
+
+    # White balance along a warm<->cool temperature axis (BGR channel order):
+    # independent R/B gains produce unrealistic green/magenta casts.
+    t = random.uniform(-1.0, 1.0)
+    amp = (WB_GAIN_RANGE[1] - 1.0)
+    gains = np.array([1.0 - amp * t + random.uniform(-0.03, 0.03),   # blue
+                      1.0 + random.uniform(-0.02, 0.02),             # green
+                      1.0 + amp * t + random.uniform(-0.03, 0.03)],  # red
+                     dtype=np.float32)
+    rgb = np.clip(rgb * gains, 0, 255)
+
+    gamma = random.uniform(*GAMMA_RANGE)
+    rgb = 255.0 * np.power(rgb / 255.0, gamma)
+
+    if random.random() < FADE_PROB:
+        f = random.uniform(*FADE_RANGE)
+        rgb = rgb * (1 - f) + 255.0 * f
+
+    if random.random() < BIG_GLARE_PROB:
+        h, w = rgb.shape[:2]
+        overlay = np.zeros((h, w), np.float32)
+        cover = random.uniform(*BIG_GLARE_COVER)
+        axes = (max(2, int(w * cover * random.uniform(0.5, 0.9))),
+                max(2, int(h * cover * random.uniform(0.5, 0.9))))
+        center = (random.randint(0, w - 1), random.randint(0, h - 1))
+        cv2.ellipse(overlay, center, axes, random.uniform(0, 180), 0, 360, 1.0, -1)
+        overlay = cv2.GaussianBlur(overlay, (0, 0), max(w, h) * 0.15)
+        a = random.uniform(*BIG_GLARE_ALPHA)
+        rgb = rgb * (1 - a * overlay[..., None]) + 255.0 * a * overlay[..., None]
+
+    out = np.clip(rgb, 0, 255).astype(np.uint8)
+    img[:, :, :3] = np.where(np.stack([mask] * 3, axis=2), out, img[:, :, :3])
+    return img
+
 
 def apply_blur(image, blur_factor):
     if blur_factor > 0.0:
@@ -442,6 +512,7 @@ def generate_image(backgrounds, cards_subset, card_backs, output_dir, label_dir,
             card_back = resize_image(random.choice(card_backs), card_size)
             angle = random.uniform(0, 360)
             card_back_rotated = rotate_image(card_back, angle)
+            card_back_rotated = apply_photometrics(card_back_rotated)
 
             card_back_blurred = apply_blur(card_back_rotated, blur_factor)
             card_back_noisy = apply_noise(
@@ -464,6 +535,7 @@ def generate_image(backgrounds, cards_subset, card_backs, output_dir, label_dir,
     for card_with_rotation in cards_subset:
         card_resized = resize_image(card_with_rotation.card['image'], card_size)
         card_rotated = rotate_image(card_resized, card_with_rotation.rotation)
+        card_rotated = apply_photometrics(card_rotated)
 
         card_blurred = apply_blur(card_rotated, blur_factor)
         card_noisy = apply_noise(
@@ -590,8 +662,9 @@ def main(num_images=NUM_IMAGES, num_val_images=NUM_VAL_IMAGES):
         if deck_dir.is_dir():
             deck_cards = load_cards(deck_dir)
             if deck_cards:
-                all_decks.append(deck_cards)
-                print(f"Loaded {len(deck_cards)} cards from {deck_dir.name}")
+                all_decks.append((deck_dir.name, deck_cards))
+                weight = DECK_WEIGHTS.get(deck_dir.name, 1.0)
+                print(f"Loaded {len(deck_cards)} cards from {deck_dir.name} (weight {weight})")
 
     if not all_decks:
         print("Error: No card images found in any deck.")
@@ -601,9 +674,21 @@ def main(num_images=NUM_IMAGES, num_val_images=NUM_VAL_IMAGES):
     all_card_backs = load_card_backs(DECKS_DIR)
     print(f"Loaded {len(all_card_backs)} card backs")
 
+    # Distractors: card-shaped non-card objects (cut cards, jokers, tarot, foreign
+    # suits). They join the backs pool so they get identical unlabeled treatment.
+    distractors_dir = resources_path("distractors")
+    if distractors_dir.exists():
+        n_distractors = 0
+        for f in sorted(distractors_dir.glob("*.png")) + sorted(distractors_dir.glob("*.jpg")):
+            img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
+            if img is not None:
+                all_card_backs.append(img)
+                n_distractors += 1
+        print(f"Loaded {n_distractors} distractors into the backs pool")
+
     # Build weighted card pool (face cards + As at 2x)
     weighted_pool = build_weighted_card_pool(all_decks)
-    total_cards = sum(len(d) for d in all_decks)
+    total_cards = sum(len(cards) for _, cards in all_decks)
     print(f"Card pool: {total_cards} unique cards -> {len(weighted_pool)} weighted entries "
           f"({len(OVEREXPRESS_CARDS)} card types at 2x)")
 
