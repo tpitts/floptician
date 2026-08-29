@@ -21,8 +21,8 @@ LETTERBOX_SIZE = (1280, 720)
 OUTPUT_SIZE = (1280, 720)
 CARD_SIZES = [63, 91, 120]  # Small, Medium, Large
 BLUR_FACTORS = [0.0, 0.15, 0.23, 0.3]  # No blur, Light, Medium, Heavy
-NUM_IMAGES = 2000
-NUM_VAL_IMAGES = 100
+NUM_IMAGES = 12000
+NUM_VAL_IMAGES = 300
 MAX_CARD_BACKS = 17
 CARDS_PER_IMAGE = 13
 MAX_OVERLAP = 0.03
@@ -34,7 +34,8 @@ OVEREXPRESS_CARDS = {'Jc', 'Jd', 'Jh', 'Js', 'Qc', 'Qd', 'Qh', 'Qs',
 # Deployment-relevant decks are sampled more often; unlisted decks weight 1.0.
 # Scale NUM_IMAGES up alongside these so low-weight decks keep their absolute exposure.
 DECK_WEIGHTS = {
-    'kem-deck-1': 2.0, 'kem-deck-2': 2.0, 'kem-deck-3': 2.0,
+    'kem-deck-1': 3.0, 'kem-deck-2': 3.0, 'kem-deck-3': 3.0,
+    'kem-deck-4': 3.0, 'kem-deck-5': 3.0,
     'angel-deck-1': 2.0, 'angel-deck-2': 2.0, 'angel-deck-3': 2.0,
     'faded-spades-camera-1': 1.5, 'faded-spades-camera-2': 1.5,
     'faded-spade-old-school-scanned': 1.5,
