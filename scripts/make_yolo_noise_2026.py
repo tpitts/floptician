@@ -21,8 +21,12 @@ LETTERBOX_SIZE = (1280, 720)
 OUTPUT_SIZE = (1280, 720)
 CARD_SIZES = [63, 91, 120]  # Small, Medium, Large
 BLUR_FACTORS = [0.0, 0.15, 0.23, 0.3]  # No blur, Light, Medium, Heavy
-NUM_IMAGES = 12000
-NUM_VAL_IMAGES = 300
+# NUM_IMAGES counts COMPOSITES; with EMIT_180 each also emits a 180-degree
+# twin, so the dataset holds 2x this many samples (6000 -> 12000 total).
+NUM_IMAGES = 6000
+NUM_VAL_IMAGES = 150
+EMIT_180 = True     # each composite also emits a 180-rotated twin (--no-180 disables)
+DEBUG_BOXES = False  # bbox debug renders cost ~40% of dataset disk; --debug-boxes enables
 MAX_CARD_BACKS = 17
 CARDS_PER_IMAGE = 13
 MAX_OVERLAP = 0.03
@@ -62,6 +66,9 @@ CAM_BLUR_SIGMA = (0.4, 1.0)
 CAM_LUMA_SIGMA = (2.0, 7.0)
 CAM_CHROMA_SIGMA = (2.0, 6.0)
 CAM_JPEG_QUALITY = (30, 60)
+CAM_WB_AMP = 0.12           # frame-level white balance: whites go blue/warm scene-wide
+CAM_SHADOW_PROB = 0.35      # soft dark cast-shadow blob (hand/chip shadows)
+CAM_SHADOW_DEPTH = (0.15, 0.40)
 
 # Define a named tuple to hold card and rotation information
 CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
@@ -436,6 +443,22 @@ def apply_camera(frame):
     img = img.astype(np.float32)
     h, w = img.shape[:2]
 
+    # scene white balance along the warm<->cool axis (BGR): tinted whites
+    t = random.uniform(-1.0, 1.0)
+    img[:, :, 0] *= 1.0 + CAM_WB_AMP * t       # blue
+    img[:, :, 2] *= 1.0 - CAM_WB_AMP * t       # red
+    img = np.clip(img, 0, 255)
+
+    # cast shadow: soft dark ellipse crossing part of the scene
+    if random.random() < CAM_SHADOW_PROB:
+        mask = np.zeros((h, w), np.float32)
+        axes = (random.randint(w // 6, w // 2), random.randint(h // 6, h // 2))
+        center = (random.randint(0, w - 1), random.randint(0, h - 1))
+        cv2.ellipse(mask, center, axes, random.uniform(0, 180), 0, 360, 1.0, -1)
+        mask = cv2.GaussianBlur(mask, (0, 0), max(w, h) * 0.06)
+        depth = random.uniform(*CAM_SHADOW_DEPTH)
+        img *= 1.0 - depth * mask[..., None]
+
     # optics
     sigma = random.uniform(*CAM_BLUR_SIGMA)
     img = cv2.GaussianBlur(img, (0, 0), sigma)
@@ -515,11 +538,13 @@ def apply_noise(image, gaussian_sigma_range=(15, 45), shadow_intensity_range=(0.
     gradient = (gradient - gradient.min()) / (gradient.max() - gradient.min())
     gradient = 1 - gradient
     gradient = np.stack([gradient]*3, axis=2)
-    shadow = (gradient * 255 * shadow_intensity).astype(np.uint8)
-
+    # signed lighting gradient: brighten one direction, darken the other
+    # (the original only ever brightened - real shadows darken cards)
+    sign = 1.0 if random.random() < 0.5 else -1.0
+    lit = noisy_image[:, :, :3].astype(np.float32) + sign * gradient * 255 * shadow_intensity
     noisy_image[:, :, :3] = np.where(
         mask_3ch,
-        cv2.addWeighted(noisy_image[:, :, :3], 1.0, shadow, 1.0, 0),
+        np.clip(lit, 0, 255).astype(np.uint8),
         noisy_image[:, :, :3]
     )
 
@@ -647,15 +672,29 @@ def generate_image(backgrounds, cards_subset, card_backs, output_dir, label_dir,
     with open(label_dir / unique_label_name, 'w') as f:
         f.write('\n'.join(label_lines) + '\n')
 
-    img_pil = Image.fromarray(cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img_pil)
+    if EMIT_180:
+        # free extra sample: 180-degree twin (valid pose; train-time flip args
+        # can't do this - independent flipud/fliplr produce impossible mirrors)
+        twin = cv2.rotate(final_image, cv2.ROTATE_180)
+        cv2.imwrite(str(output_dir / f"image_{run_id}_{index:04d}r.png"), twin)
+        twin_lines = []
+        for card_name, (x, y, w, h) in adjusted_bounding_boxes:
+            fx = OUTPUT_SIZE[0] - x - w
+            fy = OUTPUT_SIZE[1] - y - h
+            twin_lines.append(generate_yolo_annotation(card_name, (fx, fy, w, h), OUTPUT_SIZE))
+        with open(label_dir / f"image_{run_id}_{index:04d}r.txt", 'w') as f:
+            f.write('\n'.join(twin_lines) + '\n')
 
-    for name, (x, y, w, h) in adjusted_bounding_boxes:
-        draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
-        draw.text((x, y-15), name, fill="red")
+    if DEBUG_BOXES:
+        img_pil = Image.fromarray(cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img_pil)
 
-    unique_bbox_image_name = f"bbox_image_{run_id}_{index:04d}.png"
-    img_pil.save(bbox_dir / unique_bbox_image_name)
+        for name, (x, y, w, h) in adjusted_bounding_boxes:
+            draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
+            draw.text((x, y-15), name, fill="red")
+
+        unique_bbox_image_name = f"bbox_image_{run_id}_{index:04d}.png"
+        img_pil.save(bbox_dir / unique_bbox_image_name)
 
 def copy_truth_data(truth_dir, test_images_dir, test_labels_dir):
     """Copy truth/test images and labels into the dataset."""
@@ -821,5 +860,11 @@ if __name__ == "__main__":
                         help=f"synthetic image budget, spread over card-size x blur combinations (default {NUM_IMAGES})")
     parser.add_argument("--num-val", type=int, default=NUM_VAL_IMAGES,
                         help=f"how many of those images go to the val split (default {NUM_VAL_IMAGES})")
+    parser.add_argument("--no-180", action="store_true", help="do not emit 180-degree twins")
+    parser.add_argument("--debug-boxes", action="store_true", help="also render bbox debug images")
     args = parser.parse_args()
+    if args.no_180:
+        EMIT_180 = False
+    if args.debug_boxes:
+        DEBUG_BOXES = True
     main(num_images=args.num_images, num_val_images=args.num_val)
