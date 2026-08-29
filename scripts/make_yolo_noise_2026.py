@@ -314,7 +314,7 @@ def generate_rotation_sequence(num_cards, total_images, cards_per_image):
     rotations = []
     for _ in range(total_card_instances):
         base_rotation = random.choice(base_rotations)
-        variation = random.uniform(-10, 10)  # deployment cards are dealer-placed, near-upright
+        variation = random.uniform(-17, 17)  # near-upright dealer placement, with margin
         rotation = (base_rotation + variation) % 360
         rotations.append(round(rotation, 2))
 
