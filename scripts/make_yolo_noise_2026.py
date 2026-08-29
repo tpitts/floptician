@@ -33,18 +33,14 @@ OVEREXPRESS_CARDS = {'Jc', 'Jd', 'Jh', 'Js', 'Qc', 'Qd', 'Qh', 'Qs',
 
 # Deployment-relevant decks are sampled more often; unlisted decks weight 1.0.
 # Scale NUM_IMAGES up alongside these so low-weight decks keep their absolute exposure.
-# Tiered by BRAND relevance x asset PROVENANCE: real camera captures transfer
-# far better than flatbed scans (the 2024 gold run trained ~80% on camera
-# assets), so camera-sourced decks outrank scans within the same brand.
+# KEM = deployment brand (3x), other modern casino decks 2x/1.5x, vintage 1x.
 DECK_WEIGHTS = {
-    'kem-deck-3': 4.0,                                     # deployment brand, camera capture
-    'kem-deck-1': 2.0, 'kem-deck-2': 2.0,
-    'kem-deck-4': 2.0, 'kem-deck-5': 2.0,                  # deployment brand, scans
-    'angel-deck-3': 3.0,                                   # camera capture, Venetian felt
-    'angel-deck-1': 2.0, 'angel-deck-2': 2.0,              # camera, low-res
-    'faded-spades-camera-1': 2.0, 'faded-spades-camera-2': 2.0,
-    'dal-negro-deck-1': 2.0, 'dal-negro-deck-2': 2.0,      # camera
-    'faded-spade-old-school-scanned': 1.5, 'copag_wsop_2022': 1.5,
+    'kem-deck-1': 3.0, 'kem-deck-2': 3.0, 'kem-deck-3': 3.0,
+    'kem-deck-4': 3.0, 'kem-deck-5': 3.0,
+    'angel-deck-1': 2.0, 'angel-deck-2': 2.0, 'angel-deck-3': 2.0,
+    'faded-spades-camera-1': 1.5, 'faded-spades-camera-2': 1.5,
+    'faded-spade-old-school-scanned': 1.5,
+    'copag_wsop_2022': 1.5, 'dal-negro-deck-1': 1.5, 'dal-negro-deck-2': 1.5,
 }
 
 # Per-card photometric augmentation. Ranges halved after train6: the original
