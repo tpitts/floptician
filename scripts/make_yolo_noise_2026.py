@@ -23,12 +23,12 @@ CARD_SIZES = [63, 91]  # deployment-range sizes; 120 removed (real feed stays un
 BLUR_FACTORS = [0.0, 0.15, 0.23, 0.3]  # No blur, Light, Medium, Heavy
 # NUM_IMAGES counts COMPOSITES; with EMIT_180 each also emits a 180-degree
 # twin, so the dataset holds 2x this many samples (6000 -> 12000 total).
-NUM_IMAGES = 4000
+NUM_IMAGES = 3000
 NUM_VAL_IMAGES = 100
 EMIT_180 = True     # each composite also emits a 180-rotated twin (--no-180 disables)
 DEBUG_BOXES = False  # bbox debug renders cost ~40% of dataset disk; --debug-boxes enables
-MAX_CARD_BACKS = 17
-CARDS_PER_IMAGE = 13
+MAX_CARD_BACKS = 12
+CARDS_PER_IMAGE = 18
 MAX_OVERLAP = 0.03
 
 # Over-expressed ranks: face cards and Ace of Spades get 2x weight
