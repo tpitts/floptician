@@ -33,24 +33,39 @@ OVEREXPRESS_CARDS = {'Jc', 'Jd', 'Jh', 'Js', 'Qc', 'Qd', 'Qh', 'Qs',
 
 # Deployment-relevant decks are sampled more often; unlisted decks weight 1.0.
 # Scale NUM_IMAGES up alongside these so low-weight decks keep their absolute exposure.
+# Tiered by BRAND relevance x asset PROVENANCE: real camera captures transfer
+# far better than flatbed scans (the 2024 gold run trained ~80% on camera
+# assets), so camera-sourced decks outrank scans within the same brand.
 DECK_WEIGHTS = {
-    'kem-deck-1': 3.0, 'kem-deck-2': 3.0, 'kem-deck-3': 3.0,
-    'kem-deck-4': 3.0, 'kem-deck-5': 3.0,
-    'angel-deck-1': 2.0, 'angel-deck-2': 2.0, 'angel-deck-3': 2.0,
-    'faded-spades-camera-1': 1.5, 'faded-spades-camera-2': 1.5,
-    'faded-spade-old-school-scanned': 1.5,
-    'copag_wsop_2022': 1.5, 'dal-negro-deck-1': 1.5, 'dal-negro-deck-2': 1.5,
+    'kem-deck-3': 4.0,                                     # deployment brand, camera capture
+    'kem-deck-1': 2.0, 'kem-deck-2': 2.0,
+    'kem-deck-4': 2.0, 'kem-deck-5': 2.0,                  # deployment brand, scans
+    'angel-deck-3': 3.0,                                   # camera capture, Venetian felt
+    'angel-deck-1': 2.0, 'angel-deck-2': 2.0,              # camera, low-res
+    'faded-spades-camera-1': 2.0, 'faded-spades-camera-2': 2.0,
+    'dal-negro-deck-1': 2.0, 'dal-negro-deck-2': 2.0,      # camera
+    'faded-spade-old-school-scanned': 1.5, 'copag_wsop_2022': 1.5,
 }
 
-# Per-card photometric augmentation (calibrated against real failure crops):
-# washed-out pale cards, off-white-balance lighting, broad specular glare.
-FADE_PROB = 0.35
-FADE_RANGE = (0.10, 0.45)
-GAMMA_RANGE = (0.65, 1.30)
-WB_GAIN_RANGE = (0.88, 1.12)
-BIG_GLARE_PROB = 0.25
-BIG_GLARE_ALPHA = (0.15, 0.50)
-BIG_GLARE_COVER = (0.30, 1.00)
+# Per-card photometric augmentation. Ranges halved after train6: the original
+# values washed cards ~20% below the 2024 gold-run contrast profile and taught
+# the model to ignore faint cards (recall collapsed with training).
+FADE_PROB = 0.25
+FADE_RANGE = (0.05, 0.25)
+GAMMA_RANGE = (0.80, 1.20)
+WB_GAIN_RANGE = (0.94, 1.06)   # small per-card residual; scene WB is frame-level
+BIG_GLARE_PROB = 0.15
+BIG_GLARE_ALPHA = (0.10, 0.30)
+BIG_GLARE_COVER = (0.30, 0.60)
+
+# Frame-level camera simulation (applied to the composited image, mirroring the
+# physical chain: optics -> sensor noise -> codec). Noise is luma-weighted
+# (shadows noisier), chroma noise is low-frequency, and a JPEG round-trip
+# stands in for H.264 intra compression at streaming bitrates.
+CAM_BLUR_SIGMA = (0.4, 1.0)
+CAM_LUMA_SIGMA = (2.0, 7.0)
+CAM_CHROMA_SIGMA = (2.0, 6.0)
+CAM_JPEG_QUALITY = (30, 60)
 
 # Define a named tuple to hold card and rotation information
 CardWithRotation = namedtuple('CardWithRotation', ['card', 'rotation'])
@@ -296,7 +311,7 @@ def generate_rotation_sequence(num_cards, total_images, cards_per_image):
     rotations = []
     for _ in range(total_card_instances):
         base_rotation = random.choice(base_rotations)
-        variation = random.uniform(-20, 20)
+        variation = random.uniform(-10, 10)  # deployment cards are dealer-placed, near-upright
         rotation = (base_rotation + variation) % 360
         rotations.append(round(rotation, 2))
 
@@ -413,6 +428,45 @@ def apply_photometrics(image):
     return img
 
 
+def apply_camera(frame):
+    """Frame-level camera/codec simulation on the composited BGR image.
+
+    Order mirrors the physical capture chain: optical softness, then sensor
+    noise (luma-weighted gaussian + low-frequency chroma blotch), then lossy
+    compression. Applying this to the WHOLE frame keeps cards and background
+    statistically consistent - per-card noise is a learnable artifact.
+    """
+    img = frame[:, :, :3] if frame.shape[2] == 4 else frame
+    img = img.astype(np.float32)
+    h, w = img.shape[:2]
+
+    # optics
+    sigma = random.uniform(*CAM_BLUR_SIGMA)
+    img = cv2.GaussianBlur(img, (0, 0), sigma)
+
+    # sensor: luma-weighted gaussian (shadows noisier than highlights)
+    luma = img.mean(axis=2, keepdims=True) / 255.0
+    base = random.uniform(*CAM_LUMA_SIGMA)
+    noise = np.random.normal(0.0, 1.0, (h, w, 1)).astype(np.float32)
+    img += noise * base * (1.2 - luma)
+
+    # sensor: low-frequency chroma blotches
+    cs = random.uniform(*CAM_CHROMA_SIGMA)
+    small = np.random.normal(0.0, cs, (h // 8, w // 8, 3)).astype(np.float32)
+    chroma = cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
+    chroma -= chroma.mean(axis=2, keepdims=True)  # chroma only, keep luma
+    img += chroma
+
+    img = np.clip(img, 0, 255).astype(np.uint8)
+
+    # codec: JPEG round-trip approximates H.264 intra artifacts
+    q = random.randint(*CAM_JPEG_QUALITY)
+    ok, enc = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q])
+    if ok:
+        img = cv2.imdecode(enc, cv2.IMREAD_COLOR)
+    return img
+
+
 def apply_blur(image, blur_factor):
     if blur_factor > 0.0:
         image_blurred = cv2.GaussianBlur(image, (5, 5), blur_factor)
@@ -518,7 +572,7 @@ def generate_image(backgrounds, cards_subset, card_backs, output_dir, label_dir,
             card_back_blurred = apply_blur(card_back_rotated, blur_factor)
             card_back_noisy = apply_noise(
                 card_back_blurred,
-                gaussian_sigma_range=(5, 15),
+                gaussian_sigma_range=(0, 4),
                 shadow_intensity_range=(0.3, 0.7),
                 shadow_angle_range=(0, 360),
                 glare_probability=0.3,
@@ -541,7 +595,7 @@ def generate_image(backgrounds, cards_subset, card_backs, output_dir, label_dir,
         card_blurred = apply_blur(card_rotated, blur_factor)
         card_noisy = apply_noise(
             card_blurred,
-            gaussian_sigma_range=(5, 11),
+            gaussian_sigma_range=(0, 3),
             shadow_intensity_range=(0.1, 0.3),
             shadow_angle_range=(0, 360),
             glare_probability=0.4,
@@ -570,6 +624,7 @@ def generate_image(backgrounds, cards_subset, card_backs, output_dir, label_dir,
 
     letterboxed_image = letterbox_image(background, LETTERBOX_SIZE)
     final_image = cv2.resize(letterboxed_image, OUTPUT_SIZE)
+    final_image = apply_camera(final_image)
 
     unique_image_name = f"image_{run_id}_{index:04d}.png"
     cv2.imwrite(str(output_dir / unique_image_name), final_image)
