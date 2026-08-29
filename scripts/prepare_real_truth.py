@@ -23,7 +23,7 @@ import numpy as np
 from _common import resources_path
 
 CANVAS_W, CANVAS_H = 1280, 720
-TARGET_WIDTHS = [63, 91, 120]
+TARGET_WIDTHS = [63, 78, 91]  # deployment range 60-95; 120 tier removed with generation's
 MARGIN = 8  # keep the card cluster this many px inside the canvas
 
 CARD_CLASSES = ['2c','2d','2h','2s','3c','3d','3h','3s','4c','4d','4h','4s','5c','5d','5h','5s',

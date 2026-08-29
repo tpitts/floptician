@@ -19,12 +19,12 @@ NUM_WORKERS = max(1, os.cpu_count() or 1)
 INPUT_SIZE = (1280, 720)
 LETTERBOX_SIZE = (1280, 720)
 OUTPUT_SIZE = (1280, 720)
-CARD_SIZES = [63, 91, 120]  # Small, Medium, Large
+CARD_SIZES = [63, 91]  # deployment-range sizes; 120 removed (real feed stays under ~95)
 BLUR_FACTORS = [0.0, 0.15, 0.23, 0.3]  # No blur, Light, Medium, Heavy
 # NUM_IMAGES counts COMPOSITES; with EMIT_180 each also emits a 180-degree
 # twin, so the dataset holds 2x this many samples (6000 -> 12000 total).
-NUM_IMAGES = 6000
-NUM_VAL_IMAGES = 150
+NUM_IMAGES = 4000
+NUM_VAL_IMAGES = 100
 EMIT_180 = True     # each composite also emits a 180-rotated twin (--no-180 disables)
 DEBUG_BOXES = False  # bbox debug renders cost ~40% of dataset disk; --debug-boxes enables
 MAX_CARD_BACKS = 17
