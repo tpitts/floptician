@@ -43,15 +43,28 @@ BG_DIST_THRESH = 20.0
 EDGE_INSET_PX = 2
 
 
-def download(url: str, dest: Path) -> bool:
+def download(url: str, dest: Path, retries: int = 3) -> bool:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read()
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return False
-        raise
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = resp.read()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            if attempt == retries - 1:
+                print(f"  giving up on {url} (HTTP {e.code}); re-run later to resume")
+                return False
+            time.sleep(20 * (attempt + 1))
+        except (TimeoutError, urllib.error.URLError, OSError):
+            # server throttling; back off, then skip (the run is resumable)
+            if attempt == retries - 1:
+                print(f"  giving up on {url} (timeout); re-run later to resume")
+                return False
+            time.sleep(20 * (attempt + 1))
+    else:
+        return False
     # gkards serves an HTML page with HTTP 200 for images that don't exist
     if not data.startswith(b"\xff\xd8"):
         return False
