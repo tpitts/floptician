@@ -179,13 +179,14 @@ except ImportError:
 class CameraManager:
     """Unified interface: FFmpeg on macOS, DirectShow on Windows, OpenCV fallback."""
 
-    def __init__(self):
+    def __init__(self, swap_channels: bool = False):
         self.cameras = []
         self.cap = None
         self.ident = None
         self.width = None
         self.height = None
         self.fps = None
+        self.swap_channels = swap_channels
         self.refresh_camera_list()
 
     def __enter__(self):
@@ -250,13 +251,20 @@ class CameraManager:
                 else:
                     logger.warning("OpenCV FPS capture property is unavailable; skipping FPS configuration")
         self.cap = cap if ok else None
+        if ok:
+            logger.info(f"Camera opened (swap_channels={self.swap_channels})")
         return ok
 
     def set_resolution(self, width, height):
         return self.open_camera(self.ident, width, height, self.fps)
 
     def get_frame(self):
-        return self.cap.read() if self.cap else (False, None)
+        if not self.cap:
+            return False, None
+        ok, frame = self.cap.read()
+        if ok and self.swap_channels and frame is not None:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return ok, frame
 
     def release_camera(self):
         if not self.cap:

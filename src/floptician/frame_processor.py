@@ -51,6 +51,9 @@ class FrameProcessor:
 
         self.debug_mode = config.debug
 
+        self._debug_frames_saved = 0
+        self._last_debug_save_time = 0.0
+
         self.previous_frame = None
 
         if config.platform == "Windows":
@@ -119,6 +122,17 @@ class FrameProcessor:
         try:
             if self.is_valid_frame(frame_info.frame):
                 self.last_valid_frame_time = time.time()
+
+                if self.debug_mode and self._debug_frames_saved < 100:
+                    now = time.time()
+                    if now - self._last_debug_save_time >= 10.0:
+                        self._debug_frames_saved += 1
+                        path = os.path.join(
+                            self.config.output_dir, f"debug_frame_{self._debug_frames_saved:03d}.png"
+                        )
+                        cv2.imwrite(path, frame_info.frame)
+                        self._last_debug_save_time = now
+                        logger.info(f"Debug frame saved: {path}")
 
                 start_time = time.time()
                 result: BoardResult = self.board_processor.process_frame(frame_info.frame)

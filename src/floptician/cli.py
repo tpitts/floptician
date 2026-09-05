@@ -211,7 +211,7 @@ def run(
         app_config.capture.selected_webcam = webcams[0] if len(webcams) == 1 else _select_input(webcams, "webcam")
 
     elif app_config.capture.mode == CaptureMode.DIRECT_WEBCAM:
-        camera_manager = CameraManager()
+        camera_manager = CameraManager(swap_channels=app_config.capture.swap_channels)
         cameras = camera_manager.get_available_cameras()
         if not cameras:
             logger.error("No webcams found. Exiting...")

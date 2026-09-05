@@ -77,6 +77,7 @@ def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
         width=cap_raw.get("width", 640),
         height=cap_raw.get("height", 360),
         fps=cap_raw.get("fps", 1.8),
+        swap_channels=cap_raw.get("swap_channels", False),
     )
 
     # YOLO

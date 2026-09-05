@@ -126,6 +126,7 @@ yolov8m.pt
 yolov8n.pt
 yolov8l.pt
 yolov8s.pt
+yolo26n.pt
 
 # Editor settings
 .vscode/

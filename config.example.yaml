@@ -15,6 +15,7 @@ capture:
   width: 640
   height: 360
   fps: 1.8
+  # swap_channels: true  # Enable if card detection fails (BGR/RGB mismatch)
 
 yolo:
   model: 'models/yolov8l-2026-03-10.pt'

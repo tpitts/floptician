@@ -71,6 +71,7 @@ class CaptureConfig:
     width: int = 640
     height: int = 360
     fps: float = 1.8
+    swap_channels: bool = False
     # Runtime state (set after init, not from config file)
     selected_webcam: str | None = None
     camera_manager: object | None = None
