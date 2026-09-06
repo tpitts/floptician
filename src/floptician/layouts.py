@@ -2,20 +2,14 @@ from __future__ import annotations
 
 import logging
 
-from floptician.models import BoardConfiguration, CardDetection, CommunityCard, LayoutDescriptor, RowSpec
+from floptician.models import BoardConfiguration, CardDetection, CommunityCard
 
 logger = logging.getLogger(__name__)
-
-# ── Registry ──────────────────────────────────────────────────────────────────
-
-_LAYOUT_REGISTRY: list[LayoutMatcher] = []
 
 
 class LayoutMatcher:
     """Base class for layout matchers. Each subclass bundles matching, coordinate
     assignment, and validation for a single board configuration."""
-
-    descriptor: LayoutDescriptor
 
     def configuration(self) -> BoardConfiguration:
         raise NotImplementedError
@@ -30,22 +24,6 @@ class LayoutMatcher:
         raise NotImplementedError
 
 
-def register_layout(layout: LayoutMatcher) -> None:
-    _LAYOUT_REGISTRY.append(layout)
-    _LAYOUT_REGISTRY.sort(key=lambda m: m.descriptor.priority, reverse=True)
-
-
-def get_layout(config: BoardConfiguration) -> LayoutMatcher | None:
-    for layout in _LAYOUT_REGISTRY:
-        if layout.configuration() == config:
-            return layout
-    return None
-
-
-def all_layouts() -> list[LayoutMatcher]:
-    return list(_LAYOUT_REGISTRY)
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -55,8 +33,7 @@ def _sorted_by_x(row: list[CardDetection]) -> list[CardDetection]:
 
 def _make_cards(row: list[CardDetection], y: int, x_start: int = 1) -> list[CommunityCard]:
     return [
-        CommunityCard(card=c.card, x=x_start + i, y=y, confidence=c.confidence)
-        for i, c in enumerate(_sorted_by_x(row))
+        CommunityCard(card=c.card, x=x_start + i, y=y, confidence=c.confidence) for i, c in enumerate(_sorted_by_x(row))
     ]
 
 
@@ -64,14 +41,6 @@ def _make_cards(row: list[CardDetection], y: int, x_start: int = 1) -> list[Comm
 
 
 class SingleRowLayout(LayoutMatcher):
-    descriptor = LayoutDescriptor(
-        name="SINGLE_ROW",
-        row_specs=(RowSpec(role="main", valid_card_counts=(3, 4, 5), y_coordinate=1),),
-        total_cards_range=(3, 5),
-        min_detection_cards=3,
-        priority=10,
-    )
-
     def configuration(self) -> BoardConfiguration:
         return BoardConfiguration.SINGLE_ROW
 
@@ -101,17 +70,6 @@ class SingleRowLayout(LayoutMatcher):
 
 
 class TwoRowsLayout(LayoutMatcher):
-    descriptor = LayoutDescriptor(
-        name="TWO_ROWS",
-        row_specs=(
-            RowSpec(role="top", valid_card_counts=(3, 4, 5), y_coordinate=1),
-            RowSpec(role="bottom", valid_card_counts=(3, 4, 5), y_coordinate=3),
-        ),
-        total_cards_range=(6, 10),
-        min_detection_cards=6,
-        priority=20,
-    )
-
     def configuration(self) -> BoardConfiguration:
         return BoardConfiguration.TWO_ROWS
 
@@ -151,18 +109,6 @@ class TwoRowsLayout(LayoutMatcher):
 
 
 class ChihuahuaLayout(LayoutMatcher):
-    descriptor = LayoutDescriptor(
-        name="CHIHUAHUA",
-        row_specs=(
-            RowSpec(role="top", valid_card_counts=(4, 5), y_coordinate=1),
-            RowSpec(role="chihuahua", valid_card_counts=(1,), y_coordinate=2),
-            RowSpec(role="bottom", valid_card_counts=(4, 5), y_coordinate=3),
-        ),
-        total_cards_range=(9, 11),
-        min_detection_cards=9,
-        priority=50,
-    )
-
     def configuration(self) -> BoardConfiguration:
         return BoardConfiguration.CHIHUAHUA
 
@@ -237,18 +183,6 @@ class ChihuahuaLayout(LayoutMatcher):
 
 
 class RunItTwiceFlopLayout(LayoutMatcher):
-    descriptor = LayoutDescriptor(
-        name="RUN_IT_TWICE_FLOP",
-        row_specs=(
-            RowSpec(role="runout_top", valid_card_counts=(1, 2), y_coordinate=1),
-            RowSpec(role="main", valid_card_counts=(3,), y_coordinate=2),
-            RowSpec(role="runout_bottom", valid_card_counts=(1, 2), y_coordinate=3),
-        ),
-        total_cards_range=(5, 7),
-        min_detection_cards=5,
-        priority=30,
-    )
-
     def configuration(self) -> BoardConfiguration:
         return BoardConfiguration.RUN_IT_TWICE_FLOP
 
@@ -309,18 +243,6 @@ class RunItTwiceFlopLayout(LayoutMatcher):
 
 
 class RunItTwiceTurnLayout(LayoutMatcher):
-    descriptor = LayoutDescriptor(
-        name="RUN_IT_TWICE_TURN",
-        row_specs=(
-            RowSpec(role="runout_top", valid_card_counts=(1,), y_coordinate=1),
-            RowSpec(role="main", valid_card_counts=(4,), y_coordinate=2),
-            RowSpec(role="runout_bottom", valid_card_counts=(1,), y_coordinate=3),
-        ),
-        total_cards_range=(6, 6),
-        min_detection_cards=6,
-        priority=40,
-    )
-
     def configuration(self) -> BoardConfiguration:
         return BoardConfiguration.RUN_IT_TWICE_TURN
 
@@ -408,9 +330,7 @@ class RunItTwiceTurnLayout(LayoutMatcher):
         return False, {}
 
     @staticmethod
-    def _find_vertical_outlier(
-        row: list[CardDetection], median_height: float
-    ) -> tuple[CardDetection | None, int]:
+    def _find_vertical_outlier(row: list[CardDetection], median_height: float) -> tuple[CardDetection | None, int]:
         """Find a card at the edge (first or last by x) that is vertically
         offset from the other cards. Returns (card, index) or (None, -1)."""
         sorted_row = sorted(row, key=lambda c: c.box.center_x)
@@ -469,10 +389,11 @@ class RunItTwiceTurnLayout(LayoutMatcher):
         return len(mid) == 4 and len(top) == 1 and len(bot) == 1
 
 
-# ── Auto-register all layouts ────────────────────────────────────────────────
-
-register_layout(SingleRowLayout())
-register_layout(TwoRowsLayout())
-register_layout(ChihuahuaLayout())
-register_layout(RunItTwiceFlopLayout())
-register_layout(RunItTwiceTurnLayout())
+# Check specific layouts before more general layouts; the first match wins.
+LAYOUTS: tuple[LayoutMatcher, ...] = (
+    ChihuahuaLayout(),
+    RunItTwiceTurnLayout(),
+    RunItTwiceFlopLayout(),
+    TwoRowsLayout(),
+    SingleRowLayout(),
+)

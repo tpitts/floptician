@@ -10,7 +10,7 @@ import torch
 from PIL import Image
 from ultralytics import YOLO
 
-from floptician.exceptions import ModelLoadError
+from floptician.exceptions import FrameProcessingError, ModelLoadError
 from floptician.models import BoundingBox, CardDetection, YOLOConfig
 
 # Set YOLOv8 to quiet mode
@@ -81,8 +81,7 @@ class YOLOProcessor:
 
             return self._filter_detections(detections)
         except Exception as e:
-            logger.error(f"Error processing frame with YOLO: {e!s}")
-            return []
+            raise FrameProcessingError(f"Error processing frame with YOLO: {e}") from e
 
     def _extract_detections(self, results) -> list[CardDetection]:
         detections = []
@@ -125,7 +124,7 @@ class YOLOProcessor:
                         )
                     )
         else:
-            logger.error("Unsupported output data format from Core ML model.")
+            raise FrameProcessingError("Unsupported output data format from Core ML model.")
 
         return detections
 

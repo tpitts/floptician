@@ -2,7 +2,29 @@ from __future__ import annotations
 
 import pytest
 
+from floptician.exceptions import FrameProcessingError
 from floptician.models import BoundingBox, CardDetection
+from floptician.yolo_processor import YOLOProcessor
+
+
+def test_inference_exception_is_not_an_empty_detection(normal_frame):
+    processor = YOLOProcessor.__new__(YOLOProcessor)
+    processor.model_type = "pt"
+
+    def fail(_):
+        raise RuntimeError("model unavailable")
+
+    processor.model = fail
+    with pytest.raises(FrameProcessingError, match="model unavailable"):
+        processor.process_frame(normal_frame)
+
+
+def test_successful_empty_inference_remains_empty(normal_frame):
+    processor = YOLOProcessor.__new__(YOLOProcessor)
+    processor.model_type = "pt"
+    processor.model = lambda _: []
+    processor.confidence_threshold = 0.7
+    assert processor.process_frame(normal_frame) == []
 
 
 class TestBoundingBox:

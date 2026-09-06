@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
-
-sys.modules.setdefault("imageio_ffmpeg", SimpleNamespace(get_ffmpeg_exe=lambda: "ffmpeg"))
 
 from floptician import camera_manager
 

@@ -11,14 +11,17 @@ class MyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
             try:
+                with open(self.server.html_file_path, "rb") as file:
+                    html = file.read().replace(
+                        b"__FLOPTICIAN_WEBSOCKET_PORT__", str(self.server.websocket_port).encode("ascii")
+                    )
                 self.send_response(200)
                 self.send_header("Content-type", "text/html")
                 self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
                 self.send_header("Pragma", "no-cache")
                 self.send_header("Expires", "0")
                 self.end_headers()
-                with open(self.server.html_file_path, "rb") as file:
-                    self.wfile.write(file.read())
+                self.wfile.write(html)
                 logger.info(f"Served {self.server.html_file_path}")
             except Exception as e:
                 logger.error(f"Error serving {self.server.html_file_path}: {e}", exc_info=True)
@@ -32,10 +35,11 @@ class MyHandler(BaseHTTPRequestHandler):
 
 
 class HTTPServer:
-    def __init__(self, host, port, html_file):
+    def __init__(self, host, port, html_file, websocket_port=9001):
         self.host = host
         self.port = port
         self.html_file = html_file
+        self.websocket_port = websocket_port
         self.server = None
         self._is_running = threading.Event()
         self.server_thread = None
@@ -56,6 +60,7 @@ class HTTPServer:
         try:
             self.server = ThreadingHTTPServer((self.host, self.port), MyHandler)
             self.server.html_file_path = self.html_file
+            self.server.websocket_port = self.websocket_port
             logger.debug(f"HTTP Server running at http://{self.host}:{self.port}")
             logger.debug(f"Serving file: {self.html_file}")
             self._is_running.set()

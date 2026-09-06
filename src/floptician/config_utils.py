@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -94,8 +95,6 @@ def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
     bp_raw = raw.get("board_processor", {})
     board_processor = BoardProcessorConfig(
         vertical_alignment_threshold=bp_raw.get("vertical_alignment_threshold", 0.20),
-        horizontal_alignment_threshold=bp_raw.get("horizontal_alignment_threshold", 0.10),
-        image_height=bp_raw.get("image_height", 1080),
         min_frames_to_show=bp_raw.get("min_frames_to_show", 3),
         min_ms_to_show=bp_raw.get("min_ms_to_show", 1200),
         min_frames_to_remove=bp_raw.get("min_frames_to_remove", 6),
@@ -117,16 +116,46 @@ def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
     )
 
 
+def _check_number(name: str, value: Any, minimum: float, maximum: float = math.inf, *, integer=False) -> None:
+    expected_types = (int,) if integer else (int, float)
+    if type(value) not in expected_types or not math.isfinite(value) or not minimum <= value <= maximum:
+        kind = "integer" if integer else "number"
+        raise ConfigurationError(f"{name} must be a finite {kind} in [{minimum}, {maximum}], got {value!r}")
+
+
 def validate_config(config: AppConfig) -> None:
+    _check_number("YOLO confidence_threshold", config.yolo.confidence_threshold, 0, 1)
+    _check_number("YOLO overlap_threshold", config.yolo.overlap_threshold, 0, 1)
     if not (0.0 < config.yolo.confidence_threshold <= 1.0):
         raise ConfigurationError(f"YOLO confidence_threshold must be in (0, 1], got {config.yolo.confidence_threshold}")
     if not (0.0 < config.yolo.overlap_threshold <= 1.0):
         raise ConfigurationError(f"YOLO overlap_threshold must be in (0, 1], got {config.yolo.overlap_threshold}")
+    _check_number("Capture FPS", config.capture.fps, 0)
+    if config.capture.fps <= 0:
+        raise ConfigurationError(f"Capture FPS must be positive, got {config.capture.fps}")
+    for name in ("width", "height"):
+        _check_number(f"Capture {name}", getattr(config.capture, name), 1, integer=True)
+    for name, port in (
+        ("http_port", config.http_port),
+        ("websocket_port", config.websocket_port),
+        ("OBS port", config.obs.port),
+    ):
+        _check_number(name, port, 1, 65535, integer=True)
+    if config.http_port == config.websocket_port:
+        raise ConfigurationError("http_port and websocket_port must be different")
+    bp = config.board_processor
+    _check_number("vertical_alignment_threshold", bp.vertical_alignment_threshold, 0)
+    if bp.vertical_alignment_threshold == 0:
+        raise ConfigurationError("vertical_alignment_threshold must be positive")
+    for name in ("min_frames_to_show", "min_frames_to_remove"):
+        _check_number(name, getattr(bp, name), 1, integer=True)
+    for name in ("min_ms_to_show", "min_ms_to_remove"):
+        _check_number(name, getattr(bp, name), 0, integer=True)
     model_path = Path(config.yolo.model)
     if not model_path.exists():
         raise ConfigurationError(f"YOLO model file not found: {model_path}")
-    if config.capture.fps <= 0:
-        raise ConfigurationError(f"Capture FPS must be positive, got {config.capture.fps}")
+    if not Path(config.html_file).is_file():
+        raise ConfigurationError(f"Overlay HTML file not found: {config.html_file}")
 
 
 def load_config(config_path: str | None = None) -> AppConfig:
@@ -138,7 +167,14 @@ def load_config(config_path: str | None = None) -> AppConfig:
     except yaml.YAMLError as exc:
         raise ConfigurationError(f"Error parsing config file {resolved_path}: {exc}") from exc
 
-    if not raw:
+    if raw is None or raw == {}:
         raise ConfigurationError(f"Config file is empty: {resolved_path}")
-
-    return _build_app_config(raw, resolved_path)
+    if not isinstance(raw, dict):
+        raise ConfigurationError("Config must contain a YAML mapping of settings")
+    for section in ("obs", "capture", "yolo", "board_processor"):
+        if section in raw and not isinstance(raw[section], dict):
+            raise ConfigurationError(f"Config section {section!r} must be a mapping of settings")
+    try:
+        return _build_app_config(raw, resolved_path)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"Invalid config value: {exc}") from exc

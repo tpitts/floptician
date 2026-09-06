@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import statistics
 
-from floptician.layouts import all_layouts
+from floptician.layouts import LAYOUTS
 from floptician.models import BoardConfiguration, BoardProcessorConfig, CardDetection, CommunityCard
 
 logger = logging.getLogger(__name__)
@@ -13,19 +13,15 @@ class CommunityCardDetector:
     def __init__(self, config: BoardProcessorConfig):
         self.config = config
         self.vertical_alignment_threshold = config.vertical_alignment_threshold
-        self.horizontal_alignment_threshold = config.horizontal_alignment_threshold
-        self.image_height = config.image_height
 
-    def detect_community_cards(
-        self, detections: list[CardDetection]
-    ) -> tuple[list[CommunityCard], BoardConfiguration]:
+    def detect_community_cards(self, detections: list[CardDetection]) -> tuple[list[CommunityCard], BoardConfiguration]:
         if len(detections) < 3:
             return [], BoardConfiguration.NO_BOARD
 
         rows = self._group_cards_into_rows(detections)
         rows = self._sort_rows_by_y(rows)
 
-        for layout in all_layouts():
+        for layout in LAYOUTS:
             matched, context = layout.matches(rows, detections)
             if matched:
                 cards = layout.assign_coordinates(rows, context)
@@ -123,4 +119,4 @@ class CommunityCardDetector:
         return sorted(rows, key=lambda row: sum(d.box.center_y for d in row) / len(row))
 
     def validate_configuration(self, community_cards: list[CommunityCard]) -> bool:
-        return any(layout.validate(community_cards) for layout in all_layouts())
+        return any(layout.validate(community_cards) for layout in LAYOUTS)

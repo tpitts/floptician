@@ -1,65 +1,123 @@
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 import numpy as np
+import pytest
 
-from floptician.models import BoardResult, BoardState, CommunityCard
-from tests.conftest import FakeWebSocketServer
-
-
-class TestIsValidFrame:
-    """Test frame validation without instantiating FrameProcessor (test the logic)."""
-
-    def _is_valid_frame(self, frame: np.ndarray, previous_frame: np.ndarray | None = None) -> bool:
-        """Reimplementation of FrameProcessor.is_valid_frame for unit testing."""
-        if frame is None:
-            return False
-
-        total_pixels = frame.shape[0] * frame.shape[1]
-        black_pixels = np.sum(frame == 0) / 3
-        white_pixels = np.sum(frame == 255) / 3
-
-        if black_pixels / total_pixels > 0.5:
-            return False
-
-        if white_pixels / total_pixels > 0.5:
-            return False
-
-        return not (previous_frame is not None and np.array_equal(frame, previous_frame))
-
-    def test_black_frame_rejected(self, blank_frame):
-        assert self._is_valid_frame(blank_frame) is False
-
-    def test_white_frame_rejected(self):
-        white = np.full((360, 640, 3), 255, dtype=np.uint8)
-        assert self._is_valid_frame(white) is False
-
-    def test_normal_frame_accepted(self, normal_frame):
-        assert self._is_valid_frame(normal_frame) is True
-
-    def test_frozen_frame_rejected(self, normal_frame):
-        assert self._is_valid_frame(normal_frame, previous_frame=normal_frame) is False
-
-    def test_different_frames_accepted(self, normal_frame):
-        rng = np.random.default_rng(99)
-        other_frame = rng.integers(30, 200, size=(360, 640, 3), dtype=np.uint8)
-        assert self._is_valid_frame(other_frame, previous_frame=normal_frame) is True
+from floptician.exceptions import CameraError
+from floptician.frame_processor import FrameProcessor
+from floptician.models import FrameInfo
+from tests.conftest import FakeCamera
+from tests.test_board_stability import Replay, row, signature
 
 
-class TestWebSocketBroadcast:
-    def test_fake_ws_records_messages(self):
-        ws = FakeWebSocketServer()
-        ws.send_message({"state": "Showing", "board": []})
-        assert len(ws.messages) == 1
-        assert ws.messages[0]["state"] == "Showing"
+@pytest.fixture
+def pipeline(app_config, fake_obs, fake_ws, monkeypatch):
+    # Terminal input is an external boundary; exercise the actual frame processor.
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(kbhit=lambda: False, getch=lambda: b""))
+    replay = Replay(app_config)
+    processor = FrameProcessor(app_config, fake_obs, replay.processor, fake_ws)
+    app_config.capture.camera_manager = FakeCamera()
+    return processor, replay
 
-    def test_board_result_serialization(self):
-        result = BoardResult(
-            timestamp=1234.0,
-            state=BoardState.SHOWING,
-            board=[CommunityCard(card="Ah", x=1, y=1, confidence=0.95)],
-            debug_info={},
-        )
-        d = result.to_dict()
-        assert d["state"] == "Showing"
-        assert len(d["board"]) == 1
-        assert d["board"][0]["card"] == "Ah"
+
+@pytest.mark.parametrize("kind", ["black", "white", "frozen", "none"])
+def test_invalid_frame_breaks_confirmation(pipeline, normal_frame, kind):
+    processor, replay = pipeline
+    replay(0, row())
+    replay(0.6, row())
+    frames = {
+        "black": np.zeros_like(normal_frame),
+        "white": np.full_like(normal_frame, 255),
+        "frozen": normal_frame,
+        "none": None,
+    }
+    processor.previous_frame = normal_frame.copy()
+    assert processor.process_frame(FrameInfo(1, frames[kind], 1)) is None
+    assert replay(2, row()).board == []
+    assert replay(2.6, row()).board == []
+    assert len(replay(3.25, row()).board) == 3
+
+
+def test_actual_frame_validation_uses_current_black_threshold(pipeline, normal_frame):
+    processor, _ = pipeline
+    frame = normal_frame.copy()
+    frame[: int(frame.shape[0] * 0.75)] = 0
+    assert processor.is_valid_frame(frame)
+    assert not processor.is_valid_frame(frame.copy())
+
+
+def test_failed_capture_breaks_confirmation(pipeline):
+    processor, replay = pipeline
+    replay(0, row())
+    replay(0.6, row())
+    assert processor.capture_frame() is None
+    assert replay(2, row()).board == []
+    assert replay(2.6, row()).board == []
+    assert len(replay(3.25, row()).board) == 3
+
+
+def test_capture_exception_breaks_confirmation(pipeline, monkeypatch):
+    processor, replay = pipeline
+    replay(0, row())
+    replay(0.6, row())
+
+    def fail():
+        raise OSError("camera disconnected")
+
+    monkeypatch.setattr(processor.config.capture.camera_manager, "get_frame", fail)
+    with pytest.raises(CameraError):
+        processor.capture_frame()
+    assert replay(2, row()).board == []
+    assert replay(2.6, row()).board == []
+
+
+def test_inference_failure_produces_no_broadcastable_result(pipeline, normal_frame, monkeypatch):
+    processor, replay = pipeline
+    original = replay.confirm()
+
+    def fail(_):
+        raise RuntimeError("inference failed")
+
+    with monkeypatch.context() as m:
+        m.setattr(replay.detector, "process_frame", fail)
+        assert processor.process_frame(FrameInfo(1, normal_frame, 2)) is None
+        assert processor.frame_count == 0
+    assert signature(replay(3, row())) == signature(original)
+
+
+def test_capture_loop_only_broadcasts_successful_results(pipeline, normal_frame, monkeypatch):
+    processor, replay = pipeline
+    original = replay.confirm()
+    readings = iter([normal_frame, normal_frame + 1, normal_frame + 2])
+    calls = 0
+
+    def capture():
+        nonlocal calls
+        try:
+            frame = next(readings)
+        except StopIteration:
+            processor.running = False
+            return False, None
+        calls += 1
+        replay.now = 2 + calls
+        return True, frame
+
+    def detect(_):
+        if calls == 2:
+            raise RuntimeError("transient failure")
+        return row()
+
+    monkeypatch.setattr(processor.config.capture.camera_manager, "get_frame", capture)
+    monkeypatch.setattr(replay.detector, "process_frame", detect)
+    monkeypatch.setattr(processor, "check_for_quit", lambda: False)
+    monkeypatch.setattr("floptician.frame_processor.time.sleep", lambda _: None)
+    processor.run()
+    messages = processor.websocket_server.messages
+    assert len(messages) == 2
+    assert [m["frame_id"] for m in messages] == [1, 3]
+    assert all(m["configuration"] == original.configuration.name for m in messages)
+    assert all(len(m["board"]) == 3 for m in messages)
+    assert processor.config.capture.camera_manager.released

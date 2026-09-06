@@ -3,6 +3,7 @@
 Auto-discovers tests/screenshots/**/*.expected.json, pairs with .png,
 and runs the full YOLO → CommunityCardDetector pipeline.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,9 +12,11 @@ from pathlib import Path
 import cv2
 import pytest
 
+from floptician.board_processor import BoardProcessor
 from floptician.community_card_detector import CommunityCardDetector
-from floptician.models import BoardConfiguration, BoardProcessorConfig, YOLOConfig
+from floptician.models import AppConfig, BoardConfiguration, BoardProcessorConfig, BoardState, YOLOConfig
 from floptician.yolo_processor import YOLOProcessor
+from tests.conftest import FakeDetector
 
 SCREENSHOTS_DIR = Path(__file__).parent / "screenshots"
 MODEL_PATH = Path(__file__).parent.parent / "models" / "yolov8l-2026-03-10.pt"
@@ -24,10 +27,11 @@ def _discover_test_cases() -> list[tuple[str, Path, Path]]:
     cases = []
     for json_path in sorted(SCREENSHOTS_DIR.rglob("*.expected.json")):
         png_path = json_path.with_name(json_path.name.replace(".expected.json", ".png"))
-        if png_path.exists():
-            rel = png_path.relative_to(SCREENSHOTS_DIR)
-            test_id = str(rel).replace("\\", "/").replace(".png", "")
-            cases.append((test_id, png_path, json_path))
+        if not png_path.exists():
+            raise FileNotFoundError(f"Missing screenshot for {json_path}: {png_path}")
+        rel = png_path.relative_to(SCREENSHOTS_DIR)
+        test_id = str(rel).replace("\\", "/").replace(".png", "")
+        cases.append((test_id, png_path, json_path))
     return cases
 
 
@@ -78,3 +82,24 @@ def test_screenshot_detection(test_id, png_path, json_path, yolo_processor, dete
     assert actual_cards == expected_cards, (
         f"Card set mismatch.\n  Expected: {sorted(expected_cards)}\n  Actual:   {sorted(actual_cards)}"
     )
+
+    # Replay these real model detections through stabilization, then briefly occlude
+    # them. Every supported screenshot layout must retain its complete snapshot.
+    now = 0.0
+    source = FakeDetector(detections)
+    board_processor = BoardProcessor(AppConfig(), detector=source, clock=lambda: now)
+    for observation_time in (0.0, 0.6):
+        now = observation_time
+        pending = board_processor.process_frame(frame)
+        assert pending.board == []
+        assert pending.configuration == BoardConfiguration.NO_BOARD
+    now = 1.25
+    confirmed = board_processor.process_frame(frame)
+    assert confirmed.state == BoardState.SHOWING
+    assert confirmed.configuration == expected_config
+    assert {(c.card, c.x, c.y) for c in confirmed.board} == expected_cards
+    source._detections = []
+    now = 2.0
+    occluded = board_processor.process_frame(frame)
+    assert occluded.configuration == confirmed.configuration
+    assert occluded.board == confirmed.board

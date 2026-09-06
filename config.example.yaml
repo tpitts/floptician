@@ -24,7 +24,10 @@ yolo:
 
 board_processor:
   vertical_alignment_threshold: 0.20
+  # Both count AND elapsed time must agree on the complete board.
+  # Applies equally to additions, corrections, rearrangements, and layout changes.
   min_frames_to_show: 3
   min_ms_to_show: 1200
+  # Partial disappearance holds the complete board until this slower gate is met.
   min_frames_to_remove: 6
   min_ms_to_remove: 4200

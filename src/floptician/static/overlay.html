@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
+    <meta name="floptician-websocket-port" content="__FLOPTICIAN_WEBSOCKET_PORT__" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
@@ -136,12 +137,14 @@
     </div>
 
     <script>
-        const wsUrl = `ws://${window.location.hostname}:9001`;
+        const wsPort = Number(document.querySelector('meta[name="floptician-websocket-port"]').content) || 9001;
+        const wsUrl = `ws://${window.location.hostname}:${wsPort}`;
         let socket;
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 5;
         let lastMessageTime = Date.now();
         let lastBoardState = null;
+        let clearDisplayTimer = null;
     
         const suits = {
             h: { symbol: "♥", color: "text-red" },
@@ -212,6 +215,8 @@
             const showingBoard = data.board && data.board.length > 0;
 
             if (showingBoard) {
+                clearTimeout(clearDisplayTimer);
+                clearDisplayTimer = null;
                 if (lastBoardState === null) {
                     boardElement.innerHTML = "";
                 }
@@ -231,6 +236,7 @@
                     const config = data.configuration || '';
                     const newStyles = {
                         gridColumnStart: cardInfo.x.toString(),
+                        gridRowEnd: 'auto',
                         transition: 'all 0.3s ease'
                     };
 
@@ -287,8 +293,9 @@
                 // Remove cards that are no longer in the board state
                 Array.from(boardElement.children).forEach(card => {
                     if (!currentCards.has(card.getAttribute('data-card'))) {
-                        card.classList.add("fade-out");
-                        setTimeout(() => card.remove(), 500);
+                        // A confirmed correction replaces the old card immediately;
+                        // fading it here would briefly show both identities in one slot.
+                        card.remove();
                     }
                 });
 
@@ -298,9 +305,10 @@
                 Array.from(boardElement.children).forEach(card => {
                     card.classList.add("fade-out");
                 });
-                setTimeout(() => {
+                clearDisplayTimer = setTimeout(() => {
                     boardElement.innerHTML = "";
                     boardElement.classList.add("hidden");
+                    clearDisplayTimer = null;
                 }, 500);
                 lastBoardState = null;
             }
@@ -350,15 +358,16 @@
         }
     
         function clearDisplayIfInactive() {
-            if (Date.now() - lastMessageTime > 10000) {
+            if (Date.now() - lastMessageTime > 10000 && lastBoardState !== null) {
                 console.log("No messages received for 10 seconds, clearing display");
                 const boardElement = document.getElementById("board");
                 Array.from(boardElement.children).forEach(card => {
                     card.classList.add("fade-out");
                 });
-                setTimeout(() => {
+                clearDisplayTimer = setTimeout(() => {
                     boardElement.innerHTML = "";
                     boardElement.classList.add("hidden");
+                    clearDisplayTimer = null;
                 }, 500);
                 document.getElementById("debug-info").classList.add("hidden");
                 updateConnectionStatus(null);

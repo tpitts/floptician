@@ -22,6 +22,38 @@ CONFIG_DIR = FIXTURES_DIR / "config"
 IMAGES_DIR = FIXTURES_DIR / "images"
 
 
+def pytest_addoption(parser):
+    parser.addoption("--require-all-tests", action="store_true", help="Fail if any tests are skipped")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if session.config.getoption("--require-all-tests"):
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter and reporter.stats.get("skipped"):
+            reporter.write_sep("!", "Full validation requires zero skipped tests")
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.fixture
+def served_overlay():
+    from floptician.http_server import HTTPServer
+
+    servers = []
+
+    def start(websocket_port=9001):
+        html = Path(__file__).parents[1] / "src/floptician/static/overlay.html"
+        server = HTTPServer("127.0.0.1", 0, str(html), websocket_port)
+        servers.append(server)
+        server.start()
+        assert server._is_running.wait(5), "HTTP server did not start"
+        return f"http://127.0.0.1:{server.server.server_port}/"
+
+    yield start
+    for server in servers:
+        server.stop()
+        server.server_thread.join(timeout=5)
+
+
 # ── Fake implementations for protocols ──────────────────────────────────────────
 
 

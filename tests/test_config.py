@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -44,9 +43,8 @@ class TestLoadConfig:
         config = load_config(str(FIXTURES_DIR / "valid_config.yaml"))
         assert config.obs.password == "secret123"
 
-    def test_obs_password_default_empty(self):
-        # Ensure OBS_PASSWORD env var is not set
-        os.environ.pop("OBS_PASSWORD", None)
+    def test_obs_password_default_empty(self, monkeypatch):
+        monkeypatch.delenv("OBS_PASSWORD", raising=False)
         config = load_config(str(FIXTURES_DIR / "valid_config.yaml"))
         assert config.obs.password == ""
 
@@ -95,3 +93,50 @@ class TestFindConfigPath:
         cfg.write_text("debug: true")
         monkeypatch.setenv("FLOPTICIAN_CONFIG", str(cfg))
         assert find_config_path() == cfg
+
+
+@pytest.mark.parametrize(
+    "content", ["[]", "true", "capture: []", "obs: null", "capture: {mode: wrong}", "yolo: {model: 123}"]
+)
+def test_malformed_settings_have_clear_errors(tmp_path, content):
+    path = tmp_path / "config.yaml"
+    path.write_text(content)
+    with pytest.raises(ConfigurationError):
+        load_config(str(path))
+
+
+@pytest.mark.parametrize(
+    "section,name,value",
+    [
+        ("capture", "fps", "fast"),
+        ("capture", "fps", float("nan")),
+        ("capture", "width", 0),
+        ("capture", "height", True),
+        (None, "http_port", 65536),
+        (None, "websocket_port", "9001"),
+        ("obs", "port", -1),
+        ("yolo", "confidence_threshold", True),
+        ("board_processor", "min_frames_to_show", 0),
+        ("board_processor", "min_frames_to_remove", 1.5),
+        ("board_processor", "min_ms_to_remove", -1),
+        ("board_processor", "vertical_alignment_threshold", 0),
+    ],
+)
+def test_invalid_numeric_settings(app_config, section, name, value):
+    target = getattr(app_config, section) if section else app_config
+    setattr(target, name, value)
+    with pytest.raises(ConfigurationError, match=name if name != "fps" else "FPS"):
+        validate_config(app_config)
+
+
+def test_ports_must_be_distinct(app_config):
+    app_config.websocket_port = app_config.http_port
+    with pytest.raises(ConfigurationError, match="must be different"):
+        validate_config(app_config)
+
+
+def test_valid_config_passes_full_validation(app_config, tmp_path):
+    model = tmp_path / "model.pt"
+    model.write_bytes(b"placeholder")
+    app_config.yolo.model = str(model)
+    validate_config(app_config)

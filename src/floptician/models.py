@@ -36,25 +36,6 @@ class FrameProcessorState(Enum):
     FAILED = 2
 
 
-# ── Layout descriptors ────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class RowSpec:
-    role: str  # e.g. "main", "runout", "chihuahua"
-    valid_card_counts: tuple[int, ...]
-    y_coordinate: int
-
-
-@dataclass(frozen=True)
-class LayoutDescriptor:
-    name: str
-    row_specs: tuple[RowSpec, ...]
-    total_cards_range: tuple[int, int]  # (min, max) inclusive
-    min_detection_cards: int
-    priority: int  # higher = checked first
-
-
 # ── Config dataclasses ─────────────────────────────────────────────────────────
 
 
@@ -87,8 +68,6 @@ class YOLOConfig:
 @dataclass
 class BoardProcessorConfig:
     vertical_alignment_threshold: float = 0.20
-    horizontal_alignment_threshold: float = 0.10
-    image_height: int = 1080
     min_frames_to_show: int = 3
     min_ms_to_show: int = 1200
     min_frames_to_remove: int = 6

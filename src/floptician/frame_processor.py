@@ -34,7 +34,6 @@ class FrameProcessor:
         self.frame_interval = 1 / self.target_fps
 
         self.last_frame_id = 0
-        self.last_processed_id = 0
 
         self.total_processing_time = 0
         self.frame_count = 0
@@ -45,8 +44,6 @@ class FrameProcessor:
         self.start_time = time.time()
         self.last_valid_frame_time = self.start_time
 
-        self.first_frame_threshold = 8.0
-        self.subsequent_frame_threshold = 4.0
         self.is_first_frame = True
 
         self.debug_mode = config.debug
@@ -90,8 +87,11 @@ class FrameProcessor:
                     frame = None
 
             self.last_frame_id += 1
+            if frame is None:
+                self.board_processor.interrupt()
             return FrameInfo(self.last_frame_id, frame, time.time()) if frame is not None else None
         except Exception as e:
+            self.board_processor.interrupt()
             raise CameraError(f"Error in frame capture: {e}") from e
 
     def is_valid_frame(self, frame: np.ndarray) -> bool:
@@ -127,15 +127,15 @@ class FrameProcessor:
                     now = time.time()
                     if now - self._last_debug_save_time >= 10.0:
                         self._debug_frames_saved += 1
-                        path = os.path.join(
-                            self.config.output_dir, f"debug_frame_{self._debug_frames_saved:03d}.png"
-                        )
+                        path = os.path.join(self.config.output_dir, f"debug_frame_{self._debug_frames_saved:03d}.png")
                         cv2.imwrite(path, frame_info.frame)
                         self._last_debug_save_time = now
                         logger.info(f"Debug frame saved: {path}")
 
                 start_time = time.time()
-                result: BoardResult = self.board_processor.process_frame(frame_info.frame)
+                result: BoardResult | None = self.board_processor.process_frame(frame_info.frame)
+                if result is None:
+                    return None
                 processing_time = time.time() - start_time
 
                 self.total_processing_time += processing_time
@@ -166,11 +166,13 @@ class FrameProcessor:
 
                 return result_dict
             else:
+                self.board_processor.interrupt()
                 gap = time.time() - self.last_valid_frame_time
                 logger.warning(f"Invalid frame detected. Time since last valid frame: {gap:.2f}s")
                 return None
 
         except Exception as e:
+            self.board_processor.interrupt()
             raise FrameProcessingError(f"Error in frame processing: {e}") from e
 
     def check_for_quit(self):
@@ -194,13 +196,9 @@ class FrameProcessor:
                 frame_info = self.capture_frame()
 
                 if frame_info:
-                    if frame_info.frame_id > self.last_processed_id:
-                        result = self.process_frame(frame_info)
-                        if result:
-                            self.websocket_server.send_message(result)
-                            self.last_processed_id = frame_info.frame_id
-                    else:
-                        logger.info(f"Skipping old frame {frame_info.frame_id}")
+                    result = self.process_frame(frame_info)
+                    if result:
+                        self.websocket_server.send_message(result)
                 else:
                     logger.warning("No frame captured")
 

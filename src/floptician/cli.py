@@ -56,16 +56,17 @@ def _determine_torch_device() -> str:
         return "cpu"
 
 
-def _initialize_config(config_path: str | None, debug: bool, json_log: bool = False) -> AppConfig:
+def _initialize_config(config_path: str | None, debug: bool) -> AppConfig:
     try:
         config = load_config(config_path)
+        validate_config(config)
     except (FileNotFoundError, ConfigurationError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
 
     if debug:
         config.debug = True
-    configure_logging(debug=config.debug, json_output=json_log)
+    configure_logging(debug=config.debug)
 
     config.platform = platform.system()
 
@@ -107,13 +108,11 @@ def _select_input(inputs, input_type: str):
 def run(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to the config YAML file"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
-    json_log: bool = typer.Option(False, "--json-log", help="Output logs as JSON (for machine parsing)"),
 ) -> None:
     """Run the Floptician card detection system."""
-    if not json_log:
-        rprint(BANNER)
+    rprint(BANNER)
 
-    app_config = _initialize_config(config, debug, json_log=json_log)
+    app_config = _initialize_config(config, debug)
 
     if app_config.debug:
         logger.debug("Debug mode is enabled.")
@@ -132,7 +131,7 @@ def run(
     http_server = None
     websocket_server = None
     try:
-        http_server = HTTPServer(app_config.host, app_config.http_port, app_config.html_file)
+        http_server = HTTPServer(app_config.host, app_config.http_port, app_config.html_file, app_config.websocket_port)
         http_server.start()
 
         websocket_server = WebSocketServer(app_config.host, app_config.websocket_port)

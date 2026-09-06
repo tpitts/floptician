@@ -20,7 +20,6 @@ class TestCLIHelp:
         assert result.exit_code == 0
         assert "--config" in result.output
         assert "--debug" in result.output
-        assert "--json-log" in result.output
 
     def test_validate_config_help_works(self):
         result = runner.invoke(app, ["validate-config", "--help"])
@@ -43,3 +42,17 @@ class TestValidateConfigCommand:
     def test_missing_config_file(self):
         result = runner.invoke(app, ["validate-config", "--config", "/nonexistent/config.yaml"])
         assert result.exit_code == 1
+
+
+def test_run_rejects_invalid_config_before_device_or_servers(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text("capture: {fps: 0}")
+
+    def unexpected_device_probe():
+        raise AssertionError("Device selection must not run for invalid config")
+
+    monkeypatch.setattr("floptician.cli._determine_torch_device", unexpected_device_probe)
+    result = runner.invoke(app, ["run", "--config", str(path)])
+    assert result.exit_code == 1
+    assert "FPS" in result.output
+    assert not (tmp_path / "output").exists()
