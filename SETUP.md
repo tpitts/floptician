@@ -30,7 +30,7 @@ setup.bat cpu
 setup.bat cuda
 ```
 
-CUDA uses the locked PyTorch build for CUDA 12.8. Install a compatible NVIDIA
+CUDA uses the locked PyTorch build for CUDA 13.0. Install a compatible NVIDIA
 GPU driver. Setup checks CUDA availability and stops if it is unavailable;
 it does not silently report success on CPU. The selected backend is saved in
 `.venv/floptician-backend.txt` and reused on subsequent setup and updates.
@@ -39,7 +39,8 @@ it does not silently report success on CPU. The selected backend is saved in
 
 **Migration prepared; hardware validation is still pending.** Keep the working
 Mac environment until the new one has passed the tests and a live OBS session.
-The locked environment targets Apple Silicon; Intel Macs are not covered.
+The locked environment targets Apple Silicon on macOS 14 or newer; Intel Macs
+and older macOS releases are not covered by the patched PyTorch package.
 
 Install Git LFS and uv using their official installation instructions, clone the
 repository, then run:
@@ -71,10 +72,13 @@ session. On Mac, apply the same backup step before `uv sync`.
 
 Python is pinned to **3.10.20**, staying on the existing 3.10 minor version.
 The runtime baseline preserves the existing Windows `flopenv` versions of
-Ultralytics (**8.4.21**), NumPy, OpenCV, Pillow, and the application dependencies.
-PyTorch is **2.10.0**, with torchvision **0.25.0**: these replace unavailable
-nightly builds and must be treated as a tested baseline change, not an exact
-reproduction of the old environment. The model weights are unchanged.
+Ultralytics (**8.4.21**), NumPy, OpenCV, and the other application dependencies.
+Pillow is **12.3.0** and PyTorch is **2.13.0**, with torchvision **0.28.0**, to
+address the reported dependency vulnerabilities. PyTorch's Windows CUDA build
+now uses CUDA 13.0; older drivers or GPUs may require an update or CPU mode.
+These replace the original nightly builds and must be treated as a tested
+baseline change, not an exact reproduction of the old environment. The model
+weights are unchanged.
 
 ## OBS setup
 
