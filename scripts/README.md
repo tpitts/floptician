@@ -77,7 +77,6 @@ python scripts/convert.py
 
 | Script | Description |
 |--------|-------------|
-| `overlay.py` | OBS WebSocket integration for real-time YOLO detection overlay |
 | `virtualcam.py` | Webcam feed with live YOLO bounding box display |
 
 ### Training Data Generation
@@ -111,7 +110,3 @@ python scripts/convert.py
 | Script | Description |
 |--------|-------------|
 | `_common.py` | Shared path helpers (`repo_path`, `resources_path`, etc.) |
-
-## Legacy Scripts
-
-`scripts/legacy/` contains older/superseded versions of the training and capture scripts, kept for reference.
