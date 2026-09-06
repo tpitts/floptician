@@ -6,31 +6,59 @@ Floptician is a poker table card-detection project built around live capture, YO
 Run
 ---
 
-The current entrypoint is:
+Follow [SETUP.md](SETUP.md) for Windows and Apple Silicon Mac setup. Windows users
+can use `setup.bat` and `run.bat`. After syncing the environment, run:
 
 ```bash
-python main.py
+uv run --no-sync floptician run
 ```
 
 Runtime Notes
 -------------
 
-- Install dependencies with `pip install -r requirements.txt`.
 - Copy `config.example.yaml` to `config.yaml` for machine-local settings.
 - Local runtime configuration is read from `config.yaml` by default.
-- You can also point the app at another config file with `python main.py --config path/to/config.yaml` or `FLOPTICIAN_CONFIG=...`.
+- You can also point the app at another config file with `uv run --no-sync floptician run --config path/to/config.yaml` or `FLOPTICIAN_CONFIG=...`.
 - `config.yaml` is intentionally ignored and is expected to stay local to each machine.
 - Model paths in config point at files under `models/`.
 - `output/` is used for generated run artifacts.
 - If you use OBS capture mode, OBS with its WebSocket server must be available locally.
 
+Board stability uses both consecutive readings and elapsed time. With the default
+settings, initial boards, additions, corrections, and layout/position changes need
+3 matching readings spanning at least 1.2 seconds (about 1.7 seconds at 1.8 FPS).
+Cards, positions, and layout are confirmed together. A different candidate or an
+unusable frame restarts confirmation; confidence changes alone do not.
+
+Partial disappearance holds the whole board until confirmed cards remain missing
+for 6 readings spanning at least 4.2 seconds (about 4.4 seconds at 1.8 FPS).
+Seeing all confirmed cards again cancels clearing. Inference/capture failures do
+not count as empty-table readings or refresh the overlay; the existing browser
+inactivity timeout clears it after roughly 10 seconds without usable updates.
+
+See [development and validation](SETUP.md#development-and-validation) for the
+backend-specific sync commands. Run the full regression checks with
+`uv run --no-sync python -m pytest -q --require-all-tests`. This requires Chrome,
+the browser-test extra, and the tracked model weights. The flag prevents skipped
+tests from being mistaken for a complete validation run. Browser checks use
+isolated sessions and mocked WebSocket traffic, without connecting to OBS.
+
 Dependencies
 ------------
 
-- `pip install -r requirements.txt` is the default install path.
-- On Windows, `pygrabber` is installed automatically for better camera enumeration.
+uv manages `.venv` using the Python version in `.python-version` and exact
+dependency versions in `uv.lock`. `pyproject.toml` defines the dependencies;
+the lockfile is generated. On Windows, setup selects and remembers CPU or CUDA.
+For Apple Silicon Mac:
+
+```bash
+uv sync --locked --no-dev
+```
+
+- Windows development syncs use `--extra windows` plus either `--extra cpu` or `--extra cuda`.
 - On macOS, the current camera path uses FFmpeg via `imageio-ffmpeg`; PyObjC is not required.
-- If you want to use `.mlpackage` / CoreML models, install `coremltools` separately.
+- For existing `.mlpackage` / CoreML workflows on Mac, add `--extra coreml` to the sync command. Model conversion is separate work.
+- Mac migration is prepared but still needs validation on hardware; retain the working environment until then.
 
 Repo Layout
 -----------

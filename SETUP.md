@@ -1,192 +1,162 @@
-# Floptician Setup Guide
+# Floptician setup
 
-This guide walks you through setting up Floptician on a fresh Windows machine. No programming experience required — just follow each step in order.
+Floptician uses uv to install the Python version in `.python-version` and the
+packages recorded in `uv.lock`. Run commands from the repository root.
 
----
+## Windows
 
-## Step 1: Install Python
+1. Install **Git for Windows**, including Git LFS.
+2. Install **uv** using the Windows instructions at
+   https://docs.astral.sh/uv/getting-started/installation/ and open a new terminal.
+   Version 0.11.7 or newer is required. You do not need to install Python separately.
+3. Clone the repository, then download the model weights:
 
-1. Go to <https://www.python.org/downloads/>
-2. Click the big **"Download Python 3.x.x"** button
-3. Run the installer
-4. **IMPORTANT: Check the box that says "Add python.exe to PATH"** at the bottom of the first screen — this is easy to miss and everything breaks without it
-5. Click **Install Now**
-6. When it finishes, open a **new** Command Prompt (Start Menu > type `cmd` > Enter) and type:
-   ```
-   python --version
-   ```
-   You should see something like `Python 3.12.x`. If you see the Microsoft Store open instead, see [Troubleshooting](#microsoft-store-opens-instead-of-python).
-
-## Step 2: Install Git
-
-1. Go to <https://git-scm.com/download/win>
-2. Download the **64-bit Git for Windows Setup**
-3. Run the installer — the defaults are fine. Make sure **Git LFS** stays checked (it usually is by default)
-4. When it finishes, open a **new** Command Prompt and type:
-   ```
-   git --version
-   ```
-   You should see something like `git version 2.x.x.windows.1`.
-
-## Step 3: NVIDIA GPU drivers (for fast detection)
-
-Floptician uses your NVIDIA GPU to detect cards in real time. Without it, detection runs on CPU and is much slower.
-
-1. Right-click the Desktop and look for **"NVIDIA Control Panel"** or check if there's an NVIDIA icon in your system tray — if either exists, your drivers are already installed
-2. If not, go to <https://www.nvidia.com/drivers> and download the latest driver for your GPU
-3. To verify, open a Command Prompt and run:
-   ```
-   nvidia-smi
-   ```
-   You should see a table showing your GPU name, driver version, and CUDA version. The CUDA version should be **12.4 or higher**.
-
-> **No NVIDIA GPU?** Floptician still works — it just falls back to CPU, which is slower. You can skip this step.
-
-## Step 4: Clone the repo
-
-Open a Command Prompt and run:
-
-```
-cd %USERPROFILE%\Desktop
-git clone https://github.com/tpitts/floptician.git
-```
-
-This downloads the project to your Desktop. It's about **300 MB** because it includes the YOLO model files — this is normal.
-
-When it's done you'll have a `floptician` folder on your Desktop.
-
-## Step 5: Run setup.bat
-
-1. Open the `floptician` folder on your Desktop
-2. **Double-click `setup.bat`**
-3. A black terminal window will open and start installing things — this takes a few minutes the first time
-4. Wait until you see **"Setup complete!"**
-5. Press any key to close the window
-
-## Step 6: Set up OBS — Video Source + Virtual Camera
-
-Floptician doesn't read from the physical webcam directly. Instead, OBS captures the webcam and outputs a **Virtual Camera** that Floptician reads from. This lets you position and crop the camera feed in OBS.
-
-1. Open **OBS Studio**
-2. In the **Sources** panel at the bottom, click the **+** button
-3. Select **Video Capture Device**
-4. Name it whatever you want (e.g. "Poker Camera"), click OK
-5. Select your physical webcam from the **Device** dropdown, click OK
-6. Position and crop the source as needed so the poker table fills the frame
-7. In the **Controls** dock (bottom-right), click **Start Virtual Camera**
-
-The Virtual Camera is now active — Floptician will use it as its input.
-
-## Step 7: Set up OBS WebSocket
-
-Floptician sends the card overlay back into OBS through a WebSocket connection. This is built into OBS — you just need to enable it.
-
-1. In OBS, go to **Tools > WebSocket Server Settings**
-2. Check **Enable WebSocket Server**
-3. Note whether **Enable Authentication** is checked:
-   - If authentication is **off**: you're done, skip to Step 9
-   - If authentication is **on**: note the password shown (or click "Show Connect Info" to see it), then continue to Step 8
-4. Click **OK**
-
-## Step 8: Edit config.yaml (only if OBS has a WebSocket password)
-
-If OBS WebSocket authentication is enabled:
-
-1. In the `floptician` folder, right-click **config.yaml** and choose **Open with > Notepad**
-2. Find the line that says:
-   ```
-   password: ''
-   ```
-3. Type your OBS WebSocket password between the quotes:
-   ```
-   password: 'your-password-here'
-   ```
-4. Save the file (Ctrl+S) and close Notepad
-
-If OBS WebSocket authentication is disabled, skip this step — the default empty password works fine.
-
-## Step 9: Run the app
-
-1. **Double-click `run.bat`**
-2. The app will list available cameras — type the number for **"OBS Virtual Camera"** and press Enter
-3. Floptician starts detecting cards and automatically creates a browser source overlay in your OBS scene
-
-To stop, close the terminal window or press Ctrl+C.
-
----
-
-## Getting Updates
-
-When there's a new version:
-
-1. Open the `floptician` folder
-2. **Double-click `update.bat`**
-3. Wait for it to finish, press any key to close
-
-That's it — your code and dependencies are up to date. Your `config.yaml` won't be overwritten.
-
----
-
-## Troubleshooting
-
-### Microsoft Store opens instead of Python
-
-Windows sometimes redirects `python` to the Microsoft Store. To fix this:
-
-1. Open **Settings > Apps > Advanced app settings > App execution aliases**
-2. Turn **off** the toggles for "App Installer — python.exe" and "App Installer — python3.exe"
-3. Open a **new** Command Prompt and try `python --version` again
-
-### "python" is not recognized
-
-Python wasn't added to PATH during installation. The easiest fix:
-
-1. Uninstall Python from **Settings > Apps**
-2. Re-install it and make sure you check **"Add python.exe to PATH"**
-
-### No cameras found
-
-- Make sure OBS is running and **Virtual Camera is started** (Step 6)
-- Try restarting OBS, then run `run.bat` again
-
-### OBS connection failed / "Could not connect to OBS"
-
-- Make sure OBS is running
-- Check that WebSocket Server is enabled (Step 7)
-- If you set a password in OBS, make sure it matches `config.yaml` (Step 8)
-- Make sure the port in `config.yaml` matches OBS (default is `4455`)
-
-### Detection is very slow / not using GPU
-
-If setup.bat said "No NVIDIA GPU detected" but you do have an NVIDIA GPU:
-
-1. Make sure your NVIDIA drivers are up to date (Step 3)
-2. Open a Command Prompt and run `nvidia-smi` — if it's not found, your drivers aren't installed
-3. After fixing drivers, re-run `setup.bat` — it will reinstall PyTorch with CUDA
-
-To check if PyTorch is using your GPU, open a Command Prompt in the floptician folder and run:
-```
-venv\Scripts\activate
-python -c "import torch; print(torch.cuda.is_available())"
-```
-This should print `True`. If it prints `False`, PyTorch was installed without CUDA — re-run `setup.bat`.
-
-### Model files missing / tiny .pt files / detection not working
-
-The YOLO model files are stored with Git LFS. If they didn't download properly, they'll be tiny text files instead of ~100 MB model files. To fix:
-
-1. Open a Command Prompt
-2. Run:
-   ```
-   cd %USERPROFILE%\Desktop\floptician
-   git lfs install
+   ```text
+   git clone https://github.com/tpitts/floptician.git
+   cd floptician
    git lfs pull
    ```
 
-### Windows Firewall popup
+4. Double-click `setup.bat`. On the first installation it selects CUDA if
+   `nvidia-smi` is available, otherwise CPU. It creates `.venv` and copies
+   `config.example.yaml` only when `config.yaml` does not already exist.
+   Wait for **Setup complete**. CUDA downloads several gigabytes.
+5. Configure OBS as described below, then double-click `run.bat`.
 
-When you first run Floptician, Windows may ask to allow network access. Click **Allow** — the app needs to communicate locally with OBS via WebSocket.
+You can choose the backend explicitly from Command Prompt:
 
-### Port already in use
+```text
+setup.bat cpu
+setup.bat cuda
+```
 
-If you see an error about port 8000 or 9001 being in use, another program (or a previous Floptician instance) is using that port. Close any old Floptician windows and try again.
+CUDA uses the locked PyTorch build for CUDA 12.8. Install a compatible NVIDIA
+GPU driver. Setup checks CUDA availability and stops if it is unavailable;
+it does not silently report success on CPU. The selected backend is saved in
+`.venv/floptician-backend.txt` and reused on subsequent setup and updates.
+
+## Apple Silicon Mac
+
+**Migration prepared; hardware validation is still pending.** Keep the working
+Mac environment until the new one has passed the tests and a live OBS session.
+The locked environment targets Apple Silicon; Intel Macs are not covered.
+
+Install Git LFS and uv using their official installation instructions, clone the
+repository, then run:
+
+```sh
+git lfs pull
+uv sync --locked --no-dev
+cp -n config.example.yaml config.yaml
+uv run --no-sync floptician validate-config
+uv run --no-sync floptician run
+```
+
+The Mac PyTorch package supports CPU and MPS GPU inference. Core ML conversion is
+separate work; this migration does not convert the model. If you need the existing
+optional Core ML tools, add `--extra coreml` to the sync command. Do not use the
+Windows CUDA extra on a Mac.
+
+## Migrating an existing environment
+
+Leave `venv` and `flopenv` in place as backups. They are no longer used by the
+updated Windows launchers. If `.venv` already exists and was not created by the
+new setup, close Floptician and rename it to an unused backup name before setup.
+The Windows script refuses to overwrite an unmanaged `.venv`.
+
+Virtual environments can contain absolute paths: to restore an old `.venv`, close
+the app and put it back at its original path. Keep the corresponding old code
+revision too. Do not delete the backups until the replacement works in a live
+session. On Mac, apply the same backup step before `uv sync`.
+
+Python is pinned to **3.10.20**, staying on the existing 3.10 minor version.
+The runtime baseline preserves the existing Windows `flopenv` versions of
+Ultralytics (**8.4.21**), NumPy, OpenCV, Pillow, and the application dependencies.
+PyTorch is **2.10.0**, with torchvision **0.25.0**: these replace unavailable
+nightly builds and must be treated as a tested baseline change, not an exact
+reproduction of the old environment. The model weights are unchanged.
+
+## OBS setup
+
+1. Open OBS Studio and add your webcam as a **Video Capture Device** source.
+2. Position and crop it, then select **Start Virtual Camera**. This is the
+   recommended capture path; the application can also read a physical webcam.
+3. Open **Tools > WebSocket Server Settings** and enable the server.
+4. If authentication is enabled, put its password in `config.yaml` under
+   `obs.password`, or set the `OBS_PASSWORD` environment variable.
+5. Start Floptician and select **OBS Virtual Camera** when prompted. It creates
+   or refreshes the Floptician browser source in the current OBS scene.
+
+Stop with Ctrl+C. The OBS WebSocket port defaults to 4455; Floptician's separate
+HTTP and overlay WebSocket ports default to 8000 and 9001. The overlay now follows
+`websocket_port` in the configuration. HTTP and overlay WebSocket ports must differ.
+
+## Updating
+
+On Windows, double-click `update.bat`. It runs `git pull --ff-only` and then reuses
+setup to install the committed lockfile and retain your backend selection.
+If Git cannot fast-forward, it stops for manual resolution. Local configuration
+is preserved. Setup/update installs runtime packages; developers should re-sync
+with their development extras afterwards.
+
+On Mac:
+
+```sh
+git pull --ff-only
+uv sync --locked --no-dev
+uv run --no-sync floptician validate-config
+```
+
+Routine launch uses `--no-sync`, so it does not install packages or upgrade
+versions. After pulling code manually, sync before launching. Windows launch
+also checks that the lockfile matches the project metadata.
+
+## Development and validation
+
+Use the same backend choice every time you sync a Windows development environment:
+
+```text
+uv sync --locked --extra windows --extra cuda --extra browser-test
+```
+
+Substitute `--extra cpu` for `--extra cuda` for CPU testing. On Mac:
+
+```sh
+uv sync --locked --extra browser-test
+```
+
+The `dev` dependency group is installed by default. Full validation requires
+**Google Chrome** plus the tracked model and screenshot fixtures:
+
+```text
+uv run --no-sync ruff check src tests
+uv run --no-sync ruff format --check src tests
+uv run --no-sync python -m pytest -q --require-all-tests
+```
+
+`--require-all-tests` fails if any test is skipped. A successful full run must
+include the real-model screenshot tests and browser tests. These checks use
+isolated browsers and mocked OBS boundaries; they do not replace a live OBS
+session. Ordinary `python -m pytest` can skip missing optional prerequisites and
+is not the full acceptance check. Use `-m "not screenshot" --ignore=tests/test_overlay.py`
+for a deliberately smaller test run.
+
+Dependency upgrades are deliberate: edit the relevant requirement in
+`pyproject.toml`, run `uv lock`, inspect the lockfile diff, and re-run validation
+before rollout. Do not hand-edit `uv.lock` or use `uv sync --all-extras`: CPU and
+CUDA extras are mutually exclusive. Supported lockfile targets are Windows x64
+and Apple Silicon macOS, with Python 3.10-3.12; the standard setup uses 3.10.20.
+
+## Troubleshooting
+
+- **uv not found:** open a new terminal after installation and check `uv --version`.
+- **Existing .venv needs migration:** follow the backup instructions above. A
+  failed initial install can also leave a partial `.venv`; preserve/rename it and retry.
+- **CUDA unavailable:** update the driver, or explicitly use `setup.bat cpu`.
+- **Missing or tiny model file:** run `git lfs install` and `git lfs pull`.
+- **No cameras:** start OBS Virtual Camera before launching Floptician.
+- **OBS connection failure:** check OBS is open and the configured host, port,
+  and password match its WebSocket settings.
+- **Port already in use:** stop the old instance or choose unused ports in config.
+- **Invalid configuration:** run `floptician validate-config` through
+  `uv run --no-sync` and correct the setting named in the error.

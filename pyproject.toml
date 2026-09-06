@@ -6,31 +6,64 @@ build-backend = "setuptools.build_meta"
 name = "floptician"
 version = "0.1.0"
 description = "Real-time poker card detection with YOLOv8, OBS, and WebSocket overlay"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 dependencies = [
-    "numpy",
-    "opencv-python",
-    "Pillow",
-    "pyyaml",
-    "websocket-server",
-    "obsws-python",
-    "ultralytics",
-    "aioconsole",
-    "imageio-ffmpeg",
-    "typer>=0.9",
-    "rich>=13.0",
-    "python-json-logger>=2.0",
+    "numpy==2.2.6",
+    "opencv-python==4.10.0.84",
+    "Pillow==12.1.0",
+    "pyyaml==6.0.1",
+    "websocket-server==0.6.4",
+    "obsws-python==1.7.0",
+    "ultralytics==8.4.21",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    "imageio-ffmpeg==0.6.0",
+    "typer==0.24.1",
+    "rich==14.3.3",
 ]
 
 [project.optional-dependencies]
-windows = ["pygrabber"]
-coreml = ["coremltools"]
+windows = ["pygrabber==0.2; sys_platform == 'win32'"]
+cpu = ["torch==2.10.0; sys_platform == 'win32'", "torchvision==0.25.0; sys_platform == 'win32'"]
+cuda = ["torch==2.10.0; sys_platform == 'win32'", "torchvision==0.25.0; sys_platform == 'win32'"]
+coreml = ["coremltools; sys_platform == 'darwin'"]
+browser-test = ["playwright>=1.48"]
+
+[dependency-groups]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
     "mypy",
-    "ruff",
+    "ruff==0.16.4",
 ]
+
+[tool.uv]
+required-version = ">=0.11.7"
+conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
+environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu", marker = "sys_platform == 'win32'" },
+    { index = "pytorch-cu128", extra = "cuda", marker = "sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "cpu", marker = "sys_platform == 'win32'" },
+    { index = "pytorch-cu128", extra = "cuda", marker = "sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [project.scripts]
 floptician = "floptician.cli:app"

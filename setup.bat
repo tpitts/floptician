@@ -1,129 +1,62 @@
 @echo off
+setlocal
 cd /d "%~dp0"
-echo.
-echo ========================================
-echo   Floptician Setup
-echo ========================================
-echo.
+REM Keep this launcher's environment local even when called from another project.
+set "UV_PROJECT_ENVIRONMENT=%CD%\.venv"
 
-REM --- Check Python ---
-python --version >nul 2>&1
+uv --version >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Python is not installed or not on PATH.
-    echo.
-    echo Install Python from https://www.python.org/downloads/
-    echo IMPORTANT: Check "Add python.exe to PATH" during install.
-    echo.
-    pause
-    exit /b 1
-)
-echo [OK] Python found
-python --version
-
-REM --- Check Git ---
-git --version >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo WARNING: Git is not installed or not on PATH.
-    echo You won't be able to pull updates without Git.
-    echo Install Git from https://git-scm.com/download/win
-    echo.
-) else (
-    echo [OK] Git found
+    echo ERROR: Install uv first. See SETUP.md.
+    goto :failed
 )
 
-REM --- Check Git LFS ---
-git lfs version >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo WARNING: Git LFS is not installed.
-    echo Model files (.pt) may not have downloaded correctly.
-    echo Re-install Git and make sure Git LFS is checked.
-    echo.
-) else (
-    echo [OK] Git LFS found
+REM Never let uv replace an existing, unmanaged environment during migration.
+if exist ".venv" if not exist ".venv\floptician-backend.txt" (
+    echo ERROR: An existing .venv needs migration. See SETUP.md.
+    echo Rename it to an unused backup name before running setup again.
+    goto :failed
 )
 
-REM --- Create venv ---
-if not exist "venv" (
-    echo.
-    echo Creating virtual environment...
-    python -m venv venv
+set "backend=%~1"
+if not defined backend if exist ".venv\floptician-backend.txt" set /p backend=<".venv\floptician-backend.txt"
+if not defined backend (
+    set "backend=cpu"
+    nvidia-smi >nul 2>&1
+    if not errorlevel 1 set "backend=cuda"
+)
+if not "%backend%"=="cpu" if not "%backend%"=="cuda" (
+    echo ERROR: Use setup.bat, setup.bat cpu, or setup.bat cuda.
+    goto :failed
+)
+
+echo Installing the locked %backend% environment...
+uv sync --locked --no-dev --extra windows --extra %backend%
+if errorlevel 1 goto :failed
+
+REM Record the installed build so an update preserves the CPU/CUDA choice.
+>".venv\floptician-backend.txt" echo %backend%
+if not exist "config.yaml" copy config.example.yaml config.yaml >nul
+if errorlevel 1 goto :failed
+
+uv run --no-sync floptician validate-config
+if errorlevel 1 (
+    echo Fix the configuration or download the model with git lfs pull, then retry.
+    goto :failed
+)
+uv run --no-sync python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
+if errorlevel 1 goto :failed
+if "%backend%"=="cuda" (
+    uv run --no-sync python -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)"
     if errorlevel 1 (
-        echo ERROR: Failed to create virtual environment.
-        pause
-        exit /b 1
+        echo ERROR: CUDA is unavailable. Update the NVIDIA driver or use setup.bat cpu.
+        goto :failed
     )
-    echo [OK] Virtual environment created
-) else (
-    echo [OK] Virtual environment already exists
 )
+echo Setup complete. See SETUP.md for OBS setup, then run run.bat.
+if not defined FLOPTICIAN_NO_PAUSE pause
+exit /b 0
 
-REM --- Activate venv ---
-call venv\Scripts\activate.bat
-
-REM --- Upgrade pip ---
-echo.
-echo Upgrading pip...
-python -m pip install --upgrade pip
-if errorlevel 1 (
-    echo ERROR: Failed to upgrade pip.
-    pause
-    exit /b 1
-)
-
-REM --- Install PyTorch with CUDA ---
-echo.
-nvidia-smi >nul 2>&1
-if errorlevel 1 (
-    echo No NVIDIA GPU detected — installing CPU-only PyTorch.
-    echo Detection will work but will be slower.
-    echo.
-    pip install torch torchvision
-) else (
-    echo NVIDIA GPU detected — installing PyTorch with CUDA support...
-    echo This download is ~2.5 GB, it may take a while.
-    echo.
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-)
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to install PyTorch.
-    echo Check the error messages above.
-    pause
-    exit /b 1
-)
-
-REM --- Install dependencies ---
-echo.
-echo Installing Floptician and dependencies...
-pip install -e ".[windows]"
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to install dependencies.
-    echo Check the error messages above.
-    pause
-    exit /b 1
-)
-
-REM --- Copy config ---
-if not exist "config.yaml" (
-    echo.
-    echo Creating config.yaml from template...
-    copy config.example.yaml config.yaml >nul
-    echo [OK] config.yaml created
-) else (
-    echo.
-    echo [OK] config.yaml already exists (not overwritten)
-)
-
-echo.
-echo ========================================
-echo   Setup complete!
-echo ========================================
-echo.
-echo Next steps:
-echo   1. Set up OBS (see SETUP.md Steps 6-8)
-echo   2. Double-click run.bat to start
-echo.
-pause
+:failed
+echo Setup did not complete. Review the error above.
+if not defined FLOPTICIAN_NO_PAUSE pause
+exit /b 1

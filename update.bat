@@ -1,46 +1,14 @@
 @echo off
+setlocal
 cd /d "%~dp0"
-echo.
-echo ========================================
-echo   Floptician Update
-echo ========================================
-echo.
-
-REM --- Pull latest code ---
-echo Pulling latest changes...
-git pull
+echo Pulling the latest code...
+git pull --ff-only
 if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to pull updates.
-    echo Make sure you have internet access and Git is installed.
-    pause
+    echo ERROR: Update stopped. Check the connection and local Git changes.
+    echo Diverged branches must be resolved manually; no automatic merge was made.
+    if not defined FLOPTICIAN_NO_PAUSE pause
     exit /b 1
 )
-
-REM --- Activate venv and reinstall ---
-if not exist "venv\Scripts\activate.bat" (
-    echo.
-    echo ERROR: Virtual environment not found.
-    echo Please run setup.bat first.
-    pause
-    exit /b 1
-)
-
-call venv\Scripts\activate.bat
-
-echo.
-echo Updating dependencies...
-pip install -e ".[windows]"
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to update dependencies.
-    pause
-    exit /b 1
-)
-
-echo.
-echo ========================================
-echo   Update complete!
-echo ========================================
-echo.
-pause
+REM Reuse setup so updates install the same locked dependencies and backend.
+call setup.bat
+exit /b %errorlevel%
