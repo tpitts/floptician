@@ -57,7 +57,9 @@ uv sync --locked --no-dev
 
 - Windows development syncs use `--extra windows` plus either `--extra cpu` or `--extra cuda`.
 - On macOS, the current camera path uses FFmpeg via `imageio-ffmpeg`; PyObjC is not required.
-- For existing `.mlpackage` / CoreML workflows on Mac, add `--extra coreml` to the sync command. Model conversion is separate work.
+- On Apple Silicon, add `--extra coreml`, run `scripts/convert.py`, then run
+  `scripts/verify_coreml.py` before selecting the generated `.mlpackage` in `config.yaml`.
+  The default `cpu-and-ne` Core ML policy leaves the GPU available to OBS.
 - Mac migration is prepared but still needs validation on hardware; retain the working environment until then.
 
 Repo Layout

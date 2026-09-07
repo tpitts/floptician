@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import logging
 import os
 import platform
@@ -11,7 +12,7 @@ from PIL import Image
 from ultralytics import YOLO
 
 from floptician.exceptions import FrameProcessingError, ModelLoadError
-from floptician.models import BoundingBox, CardDetection, YOLOConfig
+from floptician.models import DEFAULT_YOLO_IMAGE_SIZE, BoundingBox, CardDetection, YOLOConfig
 
 # Set YOLOv8 to quiet mode
 os.environ["YOLO_VERBOSE"] = "False"
@@ -22,12 +23,16 @@ logging.getLogger("ultralytics").setLevel(logging.ERROR)
 class YOLOProcessor:
     def __init__(self, config: YOLOConfig):
         self.device = self._select_device()
+        self.inference_size = config.image_size
+        self.coreml_compute_unit = config.coreml_compute_unit
         self.confidence_threshold = config.confidence_threshold
         self.overlap_threshold = config.overlap_threshold
 
         if config.model.endswith(".pt"):
             self.model_type = "pt"
             self.model = YOLO(config.model, verbose=False).to(self.device)
+            self.input_size = (640, 640)
+            self.class_names = dict(self.model.names)
         elif config.model.endswith(".mlpackage"):
             self.model_type = "mlpackage"
             self.model = self._load_coreml_model(config.model)
@@ -52,30 +57,79 @@ class YOLOProcessor:
             raise ModelLoadError("coremltools is required to use .mlpackage models.") from e
 
         try:
-            model = ct.models.MLModel(model_path)
-            logger.info(f"Successfully loaded Core ML model from {model_path}")
-            logger.info(f"Core ML model input names: {model.input_description}")
-            logger.info(f"Core ML model output names: {model.output_description}")
+            compute_units = {
+                "all": ct.ComputeUnit.ALL,
+                "cpu-only": ct.ComputeUnit.CPU_ONLY,
+                "cpu-and-gpu": ct.ComputeUnit.CPU_AND_GPU,
+                "cpu-and-ne": ct.ComputeUnit.CPU_AND_NE,
+            }
+            requested_compute_unit = compute_units[self.coreml_compute_unit]
+            try:
+                model = ct.models.MLModel(model_path, compute_units=requested_compute_unit)
+            except Exception:
+                if requested_compute_unit == ct.ComputeUnit.ALL:
+                    raise
+                logger.warning(
+                    "Core ML compute unit %s is unavailable; falling back to all compute units",
+                    self.coreml_compute_unit,
+                    exc_info=True,
+                )
+                model = ct.models.MLModel(model_path, compute_units=ct.ComputeUnit.ALL)
+            spec = model.get_spec()
+            image_inputs = [item for item in spec.description.input if item.type.WhichOneof("Type") == "imageType"]
+            if len(image_inputs) != 1:
+                raise ValueError(f"expected exactly one image input, found {len(image_inputs)}")
+
+            output_names = {item.name for item in spec.description.output}
+            required_outputs = {"confidence", "coordinates"}
+            if not required_outputs.issubset(output_names):
+                raise ValueError(
+                    "Core ML model must be exported with embedded NMS and provide "
+                    f"{sorted(required_outputs)}; found {sorted(output_names)}"
+                )
+
+            image_input = image_inputs[0]
+            self.coreml_image_input = image_input.name
+            self.coreml_input_names = {item.name for item in spec.description.input}
+            self.input_size = (image_input.type.imageType.width, image_input.type.imageType.height)
+            if self.input_size != (self.inference_size, self.inference_size):
+                raise ValueError(
+                    f"Core ML input is {self.input_size[0]}x{self.input_size[1]}, "
+                    f"but config requests {self.inference_size}x{self.inference_size}"
+                )
+            self.class_names = self._parse_coreml_class_names(model.user_defined_metadata.get("names"))
+            logger.info(
+                "Loaded Core ML model %s (input=%s, size=%sx%s, classes=%s)",
+                model_path,
+                self.coreml_image_input,
+                self.input_size[0],
+                self.input_size[1],
+                len(self.class_names),
+            )
             return model
         except Exception as e:
             raise ModelLoadError(f"Failed to load Core ML model from {model_path}: {e}") from e
 
     def process_frame(self, frame) -> list[CardDetection]:
         try:
-            target_size = (640, 640)
+            target_size = getattr(self, "input_size", (640, 640))
             frame = self.letterbox_image(frame, target_size)
-            frame = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
             frame_height, frame_width = frame.shape[:2]
             logger.debug(f"Processing frame with dimensions: {frame_width}x{frame_height}")
 
             if self.model_type == "pt":
-                results = self.model(frame)
+                results = self.model(frame, imgsz=getattr(self, "inference_size", DEFAULT_YOLO_IMAGE_SIZE))
                 detections = self._extract_detections(results)
             elif self.model_type == "mlpackage":
-                input_image = Image.fromarray(frame)
-                input_data = {"image": input_image}
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                input_image = Image.fromarray(rgb_frame)
+                input_data = {self.coreml_image_input: input_image}
+                if "confidenceThreshold" in self.coreml_input_names:
+                    input_data["confidenceThreshold"] = self.confidence_threshold
+                if "iouThreshold" in self.coreml_input_names:
+                    input_data["iouThreshold"] = self.overlap_threshold
                 result = self.model.predict(input_data)
-                detections = self._extract_detections_coreml(result)
+                detections = self._extract_detections_coreml(result, frame_width, frame_height)
             else:
                 raise ModelLoadError("Unsupported model type.")
 
@@ -98,34 +152,45 @@ class YOLOProcessor:
                 )
         return detections
 
-    def _extract_detections_coreml(self, result) -> list[CardDetection]:
+    @staticmethod
+    def _parse_coreml_class_names(raw_names: str | None) -> dict[int, str]:
+        if not raw_names:
+            raise ValueError("Core ML model metadata is missing class names")
+        parsed = ast.literal_eval(raw_names)
+        if isinstance(parsed, list):
+            return dict(enumerate(str(name) for name in parsed))
+        if isinstance(parsed, dict):
+            return {int(index): str(name) for index, name in parsed.items()}
+        raise ValueError("Core ML class names metadata must be a list or dictionary")
+
+    def _extract_detections_coreml(self, result: dict, frame_width: int, frame_height: int) -> list[CardDetection]:
+        confidences = result.get("confidence")
+        coordinates = result.get("coordinates")
+        if not isinstance(confidences, np.ndarray) or not isinstance(coordinates, np.ndarray):
+            raise FrameProcessingError("Core ML output must contain confidence and coordinates arrays")
+        if confidences.ndim != 2 or coordinates.ndim != 2 or coordinates.shape[1] != 4:
+            raise FrameProcessingError(
+                f"Unexpected Core ML output shapes: confidence={confidences.shape}, coordinates={coordinates.shape}"
+            )
+        if confidences.shape[0] != coordinates.shape[0]:
+            raise FrameProcessingError("Core ML confidence and coordinate row counts do not match")
+
         detections = []
-        output_key = "var_1140"
-        output_data = result[output_key]
-
-        logger.debug(f"Output type: {type(output_data)}")
-        logger.debug(f"Output shape: {output_data.shape}")
-        logger.debug(f"Output data: {output_data}")
-
-        if isinstance(output_data, np.ndarray):
-            flattened_output = output_data.reshape(-1, 8400)
-
-            for detection in flattened_output:
-                class_id = int(detection[0])
-                confidence = float(detection[1])
-                bbox = detection[2:6].tolist()
-
-                if confidence >= self.confidence_threshold:
-                    detections.append(
-                        CardDetection(
-                            card=str(class_id),
-                            confidence=round(confidence, 3),
-                            box=BoundingBox.from_list(bbox),
-                        )
-                    )
-        else:
-            raise FrameProcessingError("Unsupported output data format from Core ML model.")
-
+        for scores, (center_x, center_y, width, height) in zip(confidences, coordinates, strict=True):
+            class_index = int(np.argmax(scores))
+            confidence = float(scores[class_index])
+            if confidence < self.confidence_threshold:
+                continue
+            card = self.class_names.get(class_index)
+            if card is None:
+                raise FrameProcessingError(f"Core ML returned unknown class index {class_index}")
+            box = [
+                (center_x - width / 2) * frame_width,
+                (center_y - height / 2) * frame_height,
+                (center_x + width / 2) * frame_width,
+                (center_y + height / 2) * frame_height,
+            ]
+            detections.append(CardDetection(card=card, confidence=round(confidence, 3), box=BoundingBox.from_list(box)))
         return detections
 
     def _filter_detections(self, detections: list[CardDetection]) -> list[CardDetection]:

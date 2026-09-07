@@ -19,6 +19,8 @@ class TestLoadConfig:
         assert config.http_port == 8000
         assert config.capture.mode == CaptureMode.DIRECT_WEBCAM
         assert config.capture.fps == 1.8
+        assert config.yolo.image_size == 1280
+        assert config.yolo.coreml_compute_unit == "cpu-and-ne"
         assert config.yolo.confidence_threshold == 0.70
         assert config.board_processor.min_frames_to_show == 3
 
@@ -116,6 +118,7 @@ def test_malformed_settings_have_clear_errors(tmp_path, content):
         (None, "websocket_port", "9001"),
         ("obs", "port", -1),
         ("yolo", "confidence_threshold", True),
+        ("yolo", "image_size", 1000),
         ("board_processor", "min_frames_to_show", 0),
         ("board_processor", "min_frames_to_remove", 1.5),
         ("board_processor", "min_ms_to_remove", -1),
@@ -132,6 +135,12 @@ def test_invalid_numeric_settings(app_config, section, name, value):
 def test_ports_must_be_distinct(app_config):
     app_config.websocket_port = app_config.http_port
     with pytest.raises(ConfigurationError, match="must be different"):
+        validate_config(app_config)
+
+
+def test_coreml_compute_unit_must_be_supported(app_config):
+    app_config.yolo.coreml_compute_unit = "gpu-only"
+    with pytest.raises(ConfigurationError, match="coreml_compute_unit"):
         validate_config(app_config)
 
 

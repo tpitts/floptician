@@ -53,10 +53,13 @@ uv run --no-sync floptician validate-config
 uv run --no-sync floptician run
 ```
 
-The Mac PyTorch package supports CPU and MPS GPU inference. Core ML conversion is
-separate work; this migration does not convert the model. If you need the existing
-optional Core ML tools, add `--extra coreml` to the sync command. Do not use the
-Windows CUDA extra on a Mac.
+The Mac PyTorch package supports CPU and MPS GPU inference. To create the optional
+Core ML model, add `--extra coreml` to the sync command, run
+`uv run --no-sync python scripts/convert.py`, and verify it with
+`uv run --no-sync python scripts/verify_coreml.py` before selecting the generated
+`.mlpackage` in `config.yaml`. Do not use the Windows CUDA extra on a Mac.
+The default `coreml_compute_unit: cpu-and-ne` setting uses the Neural Engine and
+leaves the GPU available for OBS; unsupported systems fall back to all Core ML compute units.
 
 ## Migrating an existing environment
 

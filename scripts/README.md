@@ -65,10 +65,14 @@ python scripts/bad_detections.py
 
 ### 7. Export
 
-Export the trained model to CoreML or TensorRT:
+Export the current model to a Core ML package with embedded non-maximum suppression,
+then compare it with PyTorch across every labeled screenshot:
 
 ```bash
-python scripts/convert.py
+uv run --no-sync python scripts/convert.py
+uv run --no-sync python scripts/verify_coreml.py
+uv run --no-sync python scripts/verify_coreml.py --compute-unit cpu-only
+uv run --no-sync python scripts/verify_coreml.py --compute-unit cpu-and-gpu
 ```
 
 ## Active Scripts
@@ -102,7 +106,8 @@ python scripts/convert.py
 | Script | Description |
 |--------|-------------|
 | `bad_detections.py` | Visualizes false positives/negatives against ground truth |
-| `convert.py` | Exports YOLO model to CoreML format |
+| `convert.py` | Exports and validates the current YOLO model as a Core ML package |
+| `verify_coreml.py` | Checks Core ML/PyTorch parity and reports inference latency |
 | `identify_cards.py` | Uses OpenAI Vision API to identify and rename card images |
 
 ### Utilities

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from floptician.exceptions import FrameProcessingError
@@ -11,7 +12,7 @@ def test_inference_exception_is_not_an_empty_detection(normal_frame):
     processor = YOLOProcessor.__new__(YOLOProcessor)
     processor.model_type = "pt"
 
-    def fail(_):
+    def fail(_, **_kwargs):
         raise RuntimeError("model unavailable")
 
     processor.model = fail
@@ -22,7 +23,7 @@ def test_inference_exception_is_not_an_empty_detection(normal_frame):
 def test_successful_empty_inference_remains_empty(normal_frame):
     processor = YOLOProcessor.__new__(YOLOProcessor)
     processor.model_type = "pt"
-    processor.model = lambda _: []
+    processor.model = lambda _, **_kwargs: []
     processor.confidence_threshold = 0.7
     assert processor.process_frame(normal_frame) == []
 
@@ -124,3 +125,43 @@ class TestFilterDetections:
                 deduped.append(det)
         assert len(deduped) == 1
         assert deduped[0].confidence == 0.95
+
+
+class TestCoreMLResultParsing:
+    def test_parses_embedded_nms_output(self):
+        processor = YOLOProcessor.__new__(YOLOProcessor)
+        processor.confidence_threshold = 0.7
+        processor.class_names = {0: "Ah", 1: "Kd"}
+        result = {
+            "confidence": np.array([[0.05, 0.9], [0.2, 0.1]], dtype=np.float32),
+            "coordinates": np.array([[0.5, 0.5, 0.25, 0.5], [0.1, 0.1, 0.1, 0.1]], dtype=np.float32),
+        }
+
+        detections = processor._extract_detections_coreml(result, frame_width=640, frame_height=320)
+
+        assert len(detections) == 1
+        assert detections[0].card == "Kd"
+        assert detections[0].confidence == 0.9
+        assert detections[0].box == BoundingBox(240.0, 80.0, 400.0, 240.0)
+
+    def test_rejects_mismatched_output_rows(self):
+        processor = YOLOProcessor.__new__(YOLOProcessor)
+        processor.confidence_threshold = 0.7
+        processor.class_names = {0: "Ah"}
+        result = {
+            "confidence": np.ones((2, 1), dtype=np.float32),
+            "coordinates": np.ones((1, 4), dtype=np.float32),
+        }
+
+        with pytest.raises(FrameProcessingError, match="row counts"):
+            processor._extract_detections_coreml(result, frame_width=640, frame_height=640)
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("{0: '2c', 1: 'Ah'}", {0: "2c", 1: "Ah"}),
+            ("['2c', 'Ah']", {0: "2c", 1: "Ah"}),
+        ],
+    )
+    def test_parses_class_metadata(self, raw, expected):
+        assert YOLOProcessor._parse_coreml_class_names(raw) == expected

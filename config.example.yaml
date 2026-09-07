@@ -18,7 +18,10 @@ capture:
   # swap_channels: true  # Enable if card detection fails (BGR/RGB mismatch)
 
 yolo:
-  model: 'models/yolov8l-2026-03-10.pt'
+  model: 'models/yolov8l-2026-08-29.pt'
+  # On Apple Silicon, export and verify the matching .mlpackage before selecting it here.
+  image_size: 1280
+  coreml_compute_unit: 'cpu-and-ne'  # Leaves the GPU available for OBS; ignored by .pt models.
   confidence_threshold: 0.70
   overlap_threshold: 0.80
 

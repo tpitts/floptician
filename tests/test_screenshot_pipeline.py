@@ -14,12 +14,19 @@ import pytest
 
 from floptician.board_processor import BoardProcessor
 from floptician.community_card_detector import CommunityCardDetector
-from floptician.models import AppConfig, BoardConfiguration, BoardProcessorConfig, BoardState, YOLOConfig
+from floptician.models import (
+    DEFAULT_YOLO_MODEL,
+    AppConfig,
+    BoardConfiguration,
+    BoardProcessorConfig,
+    BoardState,
+    YOLOConfig,
+)
 from floptician.yolo_processor import YOLOProcessor
 from tests.conftest import FakeDetector
 
 SCREENSHOTS_DIR = Path(__file__).parent / "screenshots"
-MODEL_PATH = Path(__file__).parent.parent / "models" / "yolov8l-2026-03-10.pt"
+MODEL_PATH = Path(__file__).parent.parent / DEFAULT_YOLO_MODEL
 
 
 def _discover_test_cases() -> list[tuple[str, Path, Path]]:

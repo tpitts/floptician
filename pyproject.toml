@@ -38,6 +38,7 @@ dev = [
 ]
 
 [tool.uv]
+exclude-newer = false
 required-version = ">=0.11.7"
 conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
 environments = [

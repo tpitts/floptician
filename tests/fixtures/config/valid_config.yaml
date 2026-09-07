@@ -17,7 +17,9 @@ capture:
   fps: 1.8
 
 yolo:
-  model: 'models/yolov8l-2026-03-10.pt'
+  model: 'models/yolov8l-2026-08-29.pt'
+  image_size: 1280
+  coreml_compute_unit: 'cpu-and-ne'
   confidence_threshold: 0.70
   overlap_threshold: 0.80
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+DEFAULT_YOLO_MODEL = "models/yolov8l-2026-08-29.pt"
+DEFAULT_YOLO_IMAGE_SIZE = 1280
+
 # ── Enums ──────────────────────────────────────────────────────────────────────
 
 
@@ -60,7 +63,9 @@ class CaptureConfig:
 
 @dataclass
 class YOLOConfig:
-    model: str = "models/yolov8l-2026-03-10.pt"
+    model: str = DEFAULT_YOLO_MODEL
+    image_size: int = DEFAULT_YOLO_IMAGE_SIZE
+    coreml_compute_unit: str = "cpu-and-ne"
     confidence_threshold: float = 0.70
     overlap_threshold: float = 0.80
 

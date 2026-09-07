@@ -8,7 +8,16 @@ from typing import Any
 import yaml
 
 from floptician.exceptions import ConfigurationError
-from floptician.models import AppConfig, BoardProcessorConfig, CaptureConfig, CaptureMode, OBSConfig, YOLOConfig
+from floptician.models import (
+    DEFAULT_YOLO_IMAGE_SIZE,
+    DEFAULT_YOLO_MODEL,
+    AppConfig,
+    BoardProcessorConfig,
+    CaptureConfig,
+    CaptureMode,
+    OBSConfig,
+    YOLOConfig,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
@@ -83,10 +92,12 @@ def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
 
     # YOLO
     yolo_raw = raw.get("yolo", {})
-    model_path = yolo_raw.get("model", "models/yolov8l-2026-03-10.pt")
+    model_path = yolo_raw.get("model", DEFAULT_YOLO_MODEL)
     model_path = str(resolve_path(model_path, config_dir))
     yolo = YOLOConfig(
         model=model_path,
+        image_size=yolo_raw.get("image_size", DEFAULT_YOLO_IMAGE_SIZE),
+        coreml_compute_unit=yolo_raw.get("coreml_compute_unit", "cpu-and-ne"),
         confidence_threshold=yolo_raw.get("confidence_threshold", 0.70),
         overlap_threshold=yolo_raw.get("overlap_threshold", 0.80),
     )
@@ -126,6 +137,15 @@ def _check_number(name: str, value: Any, minimum: float, maximum: float = math.i
 def validate_config(config: AppConfig) -> None:
     _check_number("YOLO confidence_threshold", config.yolo.confidence_threshold, 0, 1)
     _check_number("YOLO overlap_threshold", config.yolo.overlap_threshold, 0, 1)
+    _check_number("YOLO image_size", config.yolo.image_size, 32, integer=True)
+    if config.yolo.image_size % 32:
+        raise ConfigurationError(f"YOLO image_size must be divisible by 32, got {config.yolo.image_size}")
+    valid_compute_units = {"all", "cpu-only", "cpu-and-gpu", "cpu-and-ne"}
+    if config.yolo.coreml_compute_unit not in valid_compute_units:
+        raise ConfigurationError(
+            f"YOLO coreml_compute_unit must be one of {sorted(valid_compute_units)}, "
+            f"got {config.yolo.coreml_compute_unit!r}"
+        )
     if not (0.0 < config.yolo.confidence_threshold <= 1.0):
         raise ConfigurationError(f"YOLO confidence_threshold must be in (0, 1], got {config.yolo.confidence_threshold}")
     if not (0.0 < config.yolo.overlap_threshold <= 1.0):
