@@ -14,6 +14,7 @@ fi
 export PATH="$repo_dir/.tools/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export UV_PROJECT_ENVIRONMENT="$repo_dir/.venv"
 export UV_PYTHON_PREFERENCE=only-managed
+export PYTHONUNBUFFERED=1
 unset VIRTUAL_ENV PYTHONHOME PYTHONPATH UV_PROJECT UV_WORKING_DIRECTORY FLOPTICIAN_CONFIG
 lock_dir="$repo_dir/.floptician-operation.lock"
 if ! mkdir "$lock_dir" 2>/dev/null; then
@@ -55,9 +56,9 @@ if (( $(df -Pk . | awk 'END {print $4}') < 5 * 1024 * 1024 )); then
     echo "Please free at least 5 GB of disk space before installing/updating." >&2; exit 1
 fi
 mkdir -p .tools/bin
-if [[ ! -x .tools/bin/uv ]]; then
+if [[ ! -x .tools/bin/uv ]] || [[ "$(.tools/bin/uv --version)" != "uv 0.12.10"* ]]; then
     echo "Installing private uv (no shell-profile changes)..."
-    curl -fL --retry 3 https://astral.sh/uv/0.11.7/install.sh -o .tools/install-uv.sh
+    curl -fL --retry 3 https://astral.sh/uv/0.12.10/install.sh -o .tools/install-uv.sh
     UV_UNMANAGED_INSTALL="$repo_dir/.tools/bin" /bin/sh .tools/install-uv.sh
 fi
 if ! command -v git-lfs >/dev/null 2>&1; then

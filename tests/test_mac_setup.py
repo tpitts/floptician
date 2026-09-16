@@ -97,7 +97,8 @@ elif name == "git":
     elif args[:1] == ["rev-parse"]: print("previous-revision")
     elif args[:1] == ["pull"] and os.getenv("TEST_PULL_FAIL"): sys.exit(1)
 elif name == "uv":
-    if args[0] == "sync":
+    if args == ["--version"]: print("uv 0.12.10")
+    elif args[0] == "sync":
         if os.getenv("TEST_SYNC_FAIL"): sys.exit(1)
         pathlib.Path(".venv").mkdir(exist_ok=True)
     elif "--model-include" in args: print("models/model.mlpackage/**")
@@ -187,3 +188,23 @@ def test_failed_pull_does_not_sync_new_environment(managed_repo):
     result, trace = run("update", TEST_PULL_FAIL="1")
     assert result.returncode != 0
     assert "uv sync" not in trace
+
+
+def test_model_download_targets_only_selected_package(tmp_path, monkeypatch):
+    monkeypatch.setattr("floptician.config_utils.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("floptician.config_utils.platform.machine", lambda: "arm64")
+    (tmp_path / "config.yaml").write_text("yolo: {model: auto}\n")
+    assert configure.model_include(tmp_path) == str(Path(DEFAULT_YOLO_MODEL).with_suffix(".mlpackage")) + "/**"
+
+
+def test_password_editor_backs_up_and_preserves_other_values(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text("obs: {password: old, port: 4456}\ncapture: {fps: 2}\n")
+    original = path.read_bytes()
+    monkeypatch.setattr(configure, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["configure.py", "--obs-password"])
+    monkeypatch.setattr(configure.getpass, "getpass", lambda _: "new secret")
+    configure.main()
+    assert yaml.safe_load(path.read_text()) == {"obs": {"password": "new secret", "port": 4456}, "capture": {"fps": 2}}
+    assert next((tmp_path / "output/setup-backups").glob("*/config.yaml")).read_bytes() == original
+    assert path.stat().st_mode & 0o777 == 0o600

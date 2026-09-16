@@ -8,7 +8,7 @@ packages recorded in `uv.lock`. Run commands from the repository root.
 1. Install **Git for Windows**, including Git LFS.
 2. Install **uv** using the Windows instructions at
    https://docs.astral.sh/uv/getting-started/installation/ and open a new terminal.
-   Version 0.11.7 or newer is required. You do not need to install Python separately.
+   Version 0.12.10 or newer is required. You do not need to install Python separately.
 3. Clone the repository, then download the model weights:
 
    ```text

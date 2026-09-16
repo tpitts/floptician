@@ -40,7 +40,7 @@ dev = [
 
 [tool.uv]
 exclude-newer = false
-required-version = ">=0.11.7"
+required-version = ">=0.12.10"
 conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
 environments = [
     "sys_platform == 'win32' and platform_machine == 'AMD64'",

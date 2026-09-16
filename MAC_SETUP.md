@@ -94,7 +94,7 @@ in a separate clone. New model releases require updating `DEFAULT_YOLO_MODEL`,
 tracking the model in Git LFS, and running the full tests and Core ML validation
 before pushing. Model conversion is never part of the friend's installation.
 
-Installer tools: private uv 0.11.7; Git LFS 3.8.0 downloaded with a pinned SHA-256
+Installer tools: private uv 0.12.10; Git LFS 3.8.0 downloaded with a pinned SHA-256
 when Git LFS is absent. Git LFS configuration is repository-local. The code and
 installer come from this GitHub repository over HTTPS; this is not a signed app
 distribution system. Updating `master` publishes changes to these two users.
