@@ -66,6 +66,9 @@ uv sync --locked --no-dev
 Camera capture
 --------------
 
+For a simple Apple Silicon installation with double-click launch/update scripts,
+see [Mac setup](MAC_SETUP.md). Existing 2024 installations are left untouched.
+
 Use `floptician list-cameras` to inspect connected devices. The interactive run
 command offers an arrow-key camera menu. Device identity is resolved again before
 opening, so a changed camera index cannot silently select a different device.

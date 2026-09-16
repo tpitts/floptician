@@ -37,29 +37,25 @@ it does not silently report success on CPU. The selected backend is saved in
 
 ## Apple Silicon Mac
 
-**Migration prepared; hardware validation is still pending.** Keep the working
-Mac environment until the new one has passed the tests and a live OBS session.
-The locked environment targets Apple Silicon on macOS 14 or newer; Intel Macs
-and older macOS releases are not covered by the patched PyTorch package.
+For the non-developer install, double-click launch/update workflow, and migration
+from 2024, follow **[MAC_SETUP.md](MAC_SETUP.md)**. It leaves the old install alone.
+The supported baseline is Apple Silicon on macOS 14 or newer. Camera/Core ML/OBS
+have been tested on the development Mac; validate coexistence on each target Mac.
 
-Install Git LFS and uv using their official installation instructions, clone the
-repository, then run:
+For a development checkout with Git LFS and uv already installed:
 
 ```sh
 git lfs pull
-uv sync --locked --no-dev
+uv sync --locked --extra coreml
 cp -n config.example.yaml config.yaml
 uv run --no-sync floptician validate-config
 uv run --no-sync floptician run
 ```
 
-The Mac PyTorch package supports CPU and MPS GPU inference. To create the optional
-Core ML model, add `--extra coreml` to the sync command, run
-`uv run --no-sync python scripts/convert.py`, and verify it with
-`uv run --no-sync python scripts/verify_coreml.py` before selecting the generated
-`.mlpackage` in `config.yaml`. Do not use the Windows CUDA extra on a Mac.
-The default `coreml_compute_unit: cpu-and-ne` setting uses the Neural Engine and
-leaves the GPU available for OBS; unsupported systems fall back to all Core ML compute units.
+The shipped Core ML model is selected by `yolo.model: auto` on Apple Silicon.
+An explicit model path remains pinned. End users do not convert models. The
+default `cpu-and-ne` policy permits CPU/Neural Engine use without GPU inference.
+Do not use the Windows CUDA extra on a Mac.
 
 ## Migrating an existing environment
 
@@ -86,12 +82,14 @@ weights are unchanged.
 ## OBS setup
 
 1. Open OBS Studio and add your webcam as a **Video Capture Device** source.
-2. Position and crop it, then select **Start Virtual Camera**. This is the
-   recommended capture path; the application can also read a physical webcam.
+2. On Mac, use direct physical-camera capture; OBS Virtual Camera is not needed.
+   On Windows, OBS Virtual Camera remains an option when sharing a physical
+   camera does not work; start it in OBS before selecting it in Floptician.
 3. Open **Tools > WebSocket Server Settings** and enable the server.
 4. If authentication is enabled, put its password in `config.yaml` under
    `obs.password`, or set the `OBS_PASSWORD` environment variable.
-5. Start Floptician and select **OBS Virtual Camera** when prompted. It creates
+5. Start Floptician and select the physical camera on Mac (or the desired virtual
+   camera on Windows). It creates
    or refreshes the Floptician browser source in the current OBS scene.
 
 Stop with Ctrl+C. The OBS WebSocket port defaults to 4455; Floptician's separate
@@ -106,11 +104,11 @@ If Git cannot fast-forward, it stops for manual resolution. Local configuration
 is preserved. Setup/update installs runtime packages; developers should re-sync
 with their development extras afterwards.
 
-On Mac:
+For the managed Mac install, use **Update Floptician.command**. For development:
 
 ```sh
 git pull --ff-only
-uv sync --locked --no-dev
+uv sync --locked --extra coreml
 uv run --no-sync floptician validate-config
 ```
 
@@ -129,7 +127,7 @@ uv sync --locked --extra windows --extra cuda --extra browser-test
 Substitute `--extra cpu` for `--extra cuda` for CPU testing. On Mac:
 
 ```sh
-uv sync --locked --extra browser-test
+uv sync --locked --extra coreml --extra browser-test
 ```
 
 The `dev` dependency group is installed by default. Full validation requires
@@ -161,7 +159,8 @@ and Apple Silicon macOS, with Python 3.10-3.12; the standard setup uses 3.10.20.
   failed initial install can also leave a partial `.venv`; preserve/rename it and retry.
 - **CUDA unavailable:** update the driver, or explicitly use `setup.bat cpu`.
 - **Missing or tiny model file:** run `git lfs install` and `git lfs pull`.
-- **No cameras:** start OBS Virtual Camera before launching Floptician.
+- **No cameras:** check camera connections and macOS camera permissions. If using
+  a virtual camera, start it in OBS before launching Floptician.
 - **OBS connection failure:** check OBS is open and the configured host, port,
   and password match its WebSocket settings.
 - **Port already in use:** stop the old instance or choose unused ports in config.

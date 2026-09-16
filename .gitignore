@@ -113,6 +113,10 @@ dmypy.json
 # Project-local generated content and config
 output/
 config.yaml
+.tools/
+.floptician-mac-install
+.floptician-mac-environment
+.floptician-operation.lock/
 resources/**
 !resources/README.md
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -95,7 +96,11 @@ def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
 
     # YOLO
     yolo_raw = raw.get("yolo", {})
-    model_path = yolo_raw.get("model", DEFAULT_YOLO_MODEL)
+    model_path = yolo_raw.get("model", "auto")
+    if model_path == "auto":
+        model_path = DEFAULT_YOLO_MODEL
+        if platform.system() == "Darwin" and platform.machine() == "arm64":
+            model_path = str(Path(model_path).with_suffix(".mlpackage"))
     model_path = str(resolve_path(model_path, config_dir))
     yolo = YOLOConfig(
         model=model_path,
