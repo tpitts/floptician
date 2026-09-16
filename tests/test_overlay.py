@@ -119,3 +119,42 @@ def test_inactive_overlay_still_clears_after_timeout(overlay):
     page.clock.run_for(2100)
     assert page.locator("#board .card").count() == 0
     assert not page.locator("#board").is_visible()
+
+
+def test_unchanged_board_has_no_dom_writes_and_heartbeats_keep_it_alive(overlay):
+    page, send = overlay
+    send(cards())
+    page.clock.run_for(600)
+    page.evaluate("""() => {
+        window.mutations = [];
+        new MutationObserver(records => mutations.push(...records))
+            .observe(document.body, {subtree: true, attributes: true, childList: true, characterData: true});
+    }""")
+    for _ in range(3):
+        page.clock.run_for(5000)
+        send(list(reversed(cards())))
+    assert page.evaluate("mutations.length") == 0
+    assert page.locator("#board .card").count() == 3
+    page.clock.run_for(11000)
+    assert page.locator("#board .card").count() == 0
+    # The identical board must reappear after an inactivity clear.
+    send(cards())
+    assert page.locator("#board .card").count() == 3
+
+
+def test_existing_reveal_and_fade_animations_are_preserved(overlay):
+    page, send = overlay
+    send(cards())
+    card = page.locator("[data-card=Ah]")
+    assert card.evaluate("e => getComputedStyle(e).animationName") == "revealCard"
+    assert card.evaluate("e => getComputedStyle(e).animationDuration") == "0.5s"
+    assert card.evaluate("e => getComputedStyle(e).clipPath") != "none"
+    assert card.evaluate("e => getComputedStyle(e).transitionProperty") == "all"
+    assert card.evaluate("e => getComputedStyle(e).transitionDuration") == "0.3s"
+    assert card.evaluate("e => getComputedStyle(e).transitionTimingFunction") == "ease"
+    page.clock.run_for(600)
+    send([])
+    assert card.evaluate("e => getComputedStyle(e).animationName") == "fadeOut"
+    assert card.evaluate("e => getComputedStyle(e).animationDuration") == "0.5s"
+    page.clock.run_for(600)
+    assert page.locator("#board .card").count() == 0

@@ -145,6 +145,10 @@
         let lastMessageTime = Date.now();
         let lastBoardState = null;
         let clearDisplayTimer = null;
+        let lastRenderKey = null;
+        const boardElement = document.getElementById("board");
+        const debugInfoElement = document.getElementById("debug-info");
+        const statusElement = document.getElementById("connection-status");
     
         const suits = {
             h: { symbol: "♥", color: "text-red" },
@@ -164,7 +168,6 @@
             };
     
             socket.onmessage = function (event) {
-                console.log("Received message:", event.data);
                 lastMessageTime = Date.now();
                 try {
                     const data = JSON.parse(event.data);
@@ -195,9 +198,11 @@
         }
     
         function updateConnectionStatus(status) {
-            const statusElement = document.getElementById("connection-status");
-            statusElement.textContent = status;
-            statusElement.classList.toggle("hidden", !status);
+            const text = status || '';
+            if (statusElement.textContent !== text) statusElement.textContent = text;
+            if (statusElement.classList.contains("hidden") !== !status) {
+                statusElement.classList.toggle("hidden", !status);
+            }
         }
     
         function getCardDetails(card) {
@@ -208,9 +213,21 @@
         }
     
         function updateOverlay(data) {
-            console.log("Updating overlay with data:", data);
-            const boardElement = document.getElementById("board");
-            const debugInfoElement = document.getElementById("debug-info");
+            // Confidence/timing changes are not visual changes. Still handle debug
+            // and connection health on every message, even when the board is idle.
+            const renderKey = JSON.stringify([
+                data.configuration || '',
+                (data.board || []).map(({card, x, y}) => [card, x, y])
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+            ]);
+            if (renderKey !== lastRenderKey) {
+                updateBoard(data);
+                lastRenderKey = renderKey;
+            }
+            updateDebugInfo(data);
+        }
+
+        function updateBoard(data) {
 
             const showingBoard = data.board && data.board.length > 0;
 
@@ -222,6 +239,7 @@
                 }
 
                 const currentCards = new Set();
+                const styleUpdates = [];
 
                 data.board.forEach((cardInfo) => {
                     currentCards.add(cardInfo.card);
@@ -281,13 +299,22 @@
                     }
 
                     // Apply new styles in a separate frame to ensure smooth transition
-                    requestAnimationFrame(() => {
-                        Object.assign(cardElement.style, newStyles);
-                    });
+                    styleUpdates.push([cardElement, newStyles]);
 
                     // Update data attributes for debugging
-                    cardElement.setAttribute('data-x', cardInfo.x);
-                    cardElement.setAttribute('data-y', cardInfo.y);
+                    if (cardElement.dataset.x !== String(cardInfo.x)) cardElement.dataset.x = cardInfo.x;
+                    if (cardElement.dataset.y !== String(cardInfo.y)) cardElement.dataset.y = cardInfo.y;
+                });
+
+                // Preserve the original animation timing, but batch all card styles
+                // in one callback and avoid rewriting properties that did not change.
+                requestAnimationFrame(() => {
+                    for (const [element, styles] of styleUpdates) {
+                        if (!element.isConnected) continue;
+                        for (const [property, value] of Object.entries(styles)) {
+                            if (element.style[property] !== value) element.style[property] = value;
+                        }
+                    }
                 });
 
                 // Remove cards that are no longer in the board state
@@ -313,7 +340,9 @@
                 lastBoardState = null;
             }
 
-            // Update debug info
+        }
+
+        function updateDebugInfo(data) {
             if (data.debug_info) {
                 let debugHtml = `
                     <p>State: ${data.state}</p>
@@ -340,7 +369,7 @@
                 debugInfoElement.classList.remove("hidden");
                 updateConnectionStatus(socket.readyState === WebSocket.OPEN ? "Connected" : "Disconnected");
             } else {
-                debugInfoElement.classList.add("hidden");
+                if (!debugInfoElement.classList.contains("hidden")) debugInfoElement.classList.add("hidden");
                 updateConnectionStatus(null);
             }
         }
@@ -360,7 +389,7 @@
         function clearDisplayIfInactive() {
             if (Date.now() - lastMessageTime > 10000 && lastBoardState !== null) {
                 console.log("No messages received for 10 seconds, clearing display");
-                const boardElement = document.getElementById("board");
+                lastRenderKey = null;
                 Array.from(boardElement.children).forEach(card => {
                     card.classList.add("fade-out");
                 });
