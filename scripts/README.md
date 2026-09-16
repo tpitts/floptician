@@ -82,6 +82,31 @@ uv run --no-sync python scripts/verify_coreml.py --compute-unit cpu-and-gpu
 | Script | Description |
 |--------|-------------|
 | `virtualcam.py` | Webcam feed with live YOLO bounding box display |
+| `benchmark_capture.py` | Benchmarks the production OpenCV camera path on Mac and Windows |
+
+#### Capture benchmark
+
+Stop Floptician first, leaving OBS on the same camera and scene throughout the test.
+Select the device by its exact name or persistent ID, not a remembered numeric index.
+
+```bash
+uv run --no-sync python scripts/benchmark_capture.py --list
+uv run --no-sync python scripts/benchmark_capture.py --camera "HD Pro Webcam C920" --output output/benchmarks/capture.json
+```
+
+The same commands work on Mac and Windows. For duplicate camera names, use
+`--device-id` with the value from `--list`. Defaults request 1280×720 at 30 camera
+fps, preserve native output resolution, and sample at 1.8 fps. Use
+`--sample-fps 30` for a throughput check. Each repeat uses an
+isolated worker with a warmup period and timeout. No images are saved.
+
+The script uses the application’s actual camera manager rather than maintaining
+another capture implementation. Reports include delivered dimensions, reported
+camera FPS, successful reads, identical frames, read-call timings, sampled memory,
+and CPU (100% means one core). Inference and OBS resource usage are excluded.
+Read-call duration is not sensor-to-application latency; measure a timestamped
+visual stimulus separately for that. Short runs do not establish reconnect or
+all-day streaming reliability.
 
 ### Training Data Generation
 

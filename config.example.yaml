@@ -12,9 +12,12 @@ obs:
 
 capture:
   mode: 'direct_webcam'  # 'obs_websocket' or 'direct_webcam'
-  width: 640
+  width: 640  # OBS screenshot mode only; direct capture preserves native resolution.
   height: 360
-  fps: 1.8
+  fps: 1.8  # Detection sampling rate, independent of camera frame rate.
+  camera_width: 1280  # Requested native camera mode, passed directly to model preprocessing.
+  camera_height: 720
+  camera_fps: 30
   # swap_channels: true  # Enable if card detection fails (BGR/RGB mismatch)
 
 yolo:

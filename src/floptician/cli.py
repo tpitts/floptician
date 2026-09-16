@@ -3,23 +3,27 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import sys
 import time
+from contextlib import ExitStack
 from datetime import datetime
+from pathlib import Path
 
+import questionary
 import typer
-from rich import print as rprint
 from rich.console import Console
 from rich.table import Table
 
 from floptician.config_utils import load_config, validate_config
 from floptician.exceptions import (
+    CameraError,
     ConfigurationError,
     ModelLoadError,
     OBSConnectionError,
     ServerStartupError,
 )
 from floptician.logging_config import configure_logging
-from floptician.models import AppConfig, CaptureMode
+from floptician.models import AppConfig, CaptureMode, FrameProcessorState
 
 app = typer.Typer(
     name="floptician",
@@ -29,6 +33,13 @@ app = typer.Typer(
 
 console = Console()
 logger = logging.getLogger(__name__)
+MENU_STYLE = questionary.Style(
+    [
+        ("highlighted", "reverse bold"),
+        ("pointer", "bold"),
+        ("answer", "bold"),
+    ]
+)
 
 BANNER = r"""[bold green]
 $$$$$$$$\ $$\                      $$\     $$\           $$\
@@ -80,14 +91,31 @@ def _initialize_config(config_path: str | None, debug: bool) -> AppConfig:
 
 
 def _select_input(inputs, input_type: str):
+    names = [device if isinstance(device, str) else device.name for device in inputs]
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            index = questionary.select(
+                f"Select a {input_type}",
+                choices=[
+                    questionary.Choice(f" {name.ljust(max(map(len, names)))} ", value=i) for i, name in enumerate(names)
+                ],
+                style=MENU_STYLE,
+                use_shortcuts=len(inputs) <= 9,
+                use_jk_keys=False,
+                instruction="(↑/↓"
+                + (f" or 1-{len(inputs)}" if len(inputs) <= 9 else "")
+                + "; Enter selects; Ctrl+C cancels)",
+            ).unsafe_ask()
+        except (KeyboardInterrupt, EOFError):
+            raise typer.Abort() from None
+        return inputs[index]
+
+    # Preserve numbered input for redirected stdin and non-interactive terminals.
     table = Table(title=f"Available {input_type}s")
     table.add_column("#", style="cyan", justify="right")
     table.add_column("Name", style="green")
 
-    for i, input_device in enumerate(inputs):
-        name = (
-            input_device if isinstance(input_device, str) else input_device.get("camera_name", f"{input_type} {i + 1}")
-        )
+    for i, name in enumerate(names):
         table.add_row(str(i + 1), name)
 
     console.print(table)
@@ -110,16 +138,12 @@ def run(
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
 ) -> None:
     """Run the Floptician card detection system."""
-    rprint(BANNER)
-
+    if console.is_terminal and console.width >= 80:
+        console.print(BANNER)
+    else:
+        console.print("Floptician · Poker card detection", style="bold green")
     app_config = _initialize_config(config, debug)
 
-    if app_config.debug:
-        logger.debug("Debug mode is enabled.")
-    logger.info(f"Platform: {app_config.platform}")
-    logger.info(f"Inference Device: {app_config.torch_device}")
-
-    # Lazy imports for heavy deps
     from floptician.board_processor import BoardProcessor
     from floptician.camera_manager import CameraManager
     from floptician.frame_processor import FrameProcessor
@@ -127,121 +151,76 @@ def run(
     from floptician.obs_client import OBSClient
     from floptician.websocket_server import WebSocketServer
 
-    # Start servers
-    http_server = None
-    websocket_server = None
+    logger.info("Platform: %s", app_config.platform)
     try:
-        http_server = HTTPServer(app_config.host, app_config.http_port, app_config.html_file, app_config.websocket_port)
-        http_server.start()
+        # The composition root owns all external resources, including failure paths.
+        with ExitStack() as resources:
+            if app_config.capture.mode == CaptureMode.DIRECT_WEBCAM:
+                camera = resources.enter_context(CameraManager(swap_channels=app_config.capture.swap_channels))
+                devices = camera.get_available_cameras()
+                if not devices:
+                    raise CameraError("No cameras found. Check camera permissions and connections.")
+                selected = devices[0] if len(devices) == 1 else _select_input(devices, "camera")
+                capture = app_config.capture
+                camera.open_camera(
+                    selected,
+                    camera_width=capture.camera_width,
+                    camera_height=capture.camera_height,
+                    camera_fps=capture.camera_fps,
+                )
+                capture.camera_manager = camera
 
-        websocket_server = WebSocketServer(app_config.host, app_config.websocket_port)
-        websocket_server.start()
-
-        start_time = time.time()
-        http_running = ws_running = False
-
-        while time.time() - start_time < 5:
-            if not http_running and http_server.is_running():
-                logger.info("HTTP server is running")
-                http_running = True
-            if not ws_running and websocket_server.is_running():
-                logger.info("WebSocket server is running")
-                ws_running = True
-            if http_running and ws_running:
-                break
-            time.sleep(0.1)
-
-        if not http_running:
-            raise RuntimeError("HTTP server failed to start within the timeout period")
-        if not ws_running:
-            raise RuntimeError("WebSocket server failed to start within the timeout period")
-
-    except ServerStartupError as e:
-        logger.error(f"Server startup error: {e}")
-        if http_server:
-            http_server.stop()
-        if websocket_server:
-            websocket_server.stop()
-        raise typer.Exit(code=1) from None
-    except Exception as e:
-        logger.error(f"Error starting servers: {e}", exc_info=True)
-        if http_server:
-            http_server.stop()
-        if websocket_server:
-            websocket_server.stop()
-        raise typer.Exit(code=1) from None
-
-    # Initialize board processor (loads YOLO model)
-    try:
-        with console.status("[bold cyan]Loading YOLO model..."):
+            logger.info("Loading model: %s", Path(app_config.yolo.model).name)
             board_processor = BoardProcessor(app_config)
-        logger.info(
-            f"BoardProcessor started | YOLO model: {app_config.yolo.model} | Inference: {app_config.torch_device}"
-        )
-    except ModelLoadError as e:
-        logger.error(f"Error loading YOLO model: {e!s}")
-        http_server.stop()
-        websocket_server.stop()
+            if Path(app_config.yolo.model).suffix == ".mlpackage":
+                logger.info("Inference: Core ML | configured compute units: %s", app_config.yolo.coreml_compute_unit)
+            else:
+                logger.info("Inference: PyTorch | device: %s", app_config.torch_device)
+
+            http_server = HTTPServer(
+                app_config.host, app_config.http_port, app_config.html_file, app_config.websocket_port
+            )
+            http_server.start()
+            resources.callback(http_server.stop)
+            websocket_server = WebSocketServer(app_config.host, app_config.websocket_port)
+            websocket_server.start()
+            resources.callback(websocket_server.stop)
+            deadline = time.monotonic() + 5
+            while not (http_server.is_running() and websocket_server.is_running()):
+                if time.monotonic() >= deadline:
+                    raise ServerStartupError("HTTP or WebSocket server failed to start within 5 seconds")
+                time.sleep(0.05)
+
+            obs_client = OBSClient(app_config)
+            resources.callback(obs_client.disconnect)
+            version = obs_client.get_version()
+            logger.info("Connected to OBS WebSocket %s", version.obs_web_socket_version)
+            obs_client.setup_overlay()
+            if app_config.capture.mode == CaptureMode.OBS_WEBSOCKET:
+                webcams = obs_client.get_webcams()
+                if not webcams:
+                    raise CameraError("No camera sources found in OBS")
+                app_config.capture.selected_webcam = (
+                    webcams[0] if len(webcams) == 1 else _select_input(webcams, "webcam")
+                )
+
+            logger.info("Ready | detection target %.2f fps | q or Ctrl+C to quit", app_config.capture.fps)
+            logger.info("Overlay: http://%s:%s/", app_config.host, app_config.http_port)
+            processor = FrameProcessor(app_config, obs_client, board_processor, websocket_server)
+            processor.run()
+            if processor.state == FrameProcessorState.FAILED:
+                raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except (KeyboardInterrupt, typer.Abort):
+        logger.info("Capture cancelled")
+        raise typer.Exit(code=130) from None
+    except (CameraError, ModelLoadError, OBSConnectionError, ServerStartupError) as exc:
+        logger.error("%s", exc)
         raise typer.Exit(code=1) from None
-
-    # Connect to OBS
-    try:
-        obs_client = OBSClient(app_config)
-        version_info = obs_client.get_version()
-        logger.info(
-            f"Connected to OBS WebSocket API {app_config.obs.host}:{app_config.obs.port} "
-            f"using version: {version_info.obs_web_socket_version}"
-        )
-        obs_client.setup_overlay()
-    except OBSConnectionError as e:
-        logger.error(str(e))
-        http_server.stop()
-        websocket_server.stop()
+    except Exception:
+        logger.exception("Unexpected capture error")
         raise typer.Exit(code=1) from None
-
-    # Set up capture method
-    if app_config.capture.mode == CaptureMode.OBS_WEBSOCKET:
-        webcams = obs_client.get_webcams()
-        if not webcams:
-            logger.error("No webcams found in OBS. Exiting...")
-            http_server.stop()
-            websocket_server.stop()
-            raise typer.Exit(code=1)
-        app_config.capture.selected_webcam = webcams[0] if len(webcams) == 1 else _select_input(webcams, "webcam")
-
-    elif app_config.capture.mode == CaptureMode.DIRECT_WEBCAM:
-        camera_manager = CameraManager(swap_channels=app_config.capture.swap_channels)
-        cameras = camera_manager.get_available_cameras()
-        if not cameras:
-            logger.error("No webcams found. Exiting...")
-            http_server.stop()
-            websocket_server.stop()
-            raise typer.Exit(code=1)
-
-        selected_camera = cameras[0] if len(cameras) == 1 else _select_input(cameras, "camera")
-        if not camera_manager.open_camera(selected_camera["camera_index"]):
-            logger.error(f"Failed to open camera {selected_camera['camera_name']}. Exiting...")
-            http_server.stop()
-            websocket_server.stop()
-            raise typer.Exit(code=1)
-
-        camera_manager.set_resolution(app_config.capture.width, app_config.capture.height)
-        app_config.capture.camera_manager = camera_manager
-
-    # Run frame processor
-    logger.info("Starting frame processor...")
-    frame_processor = FrameProcessor(app_config, obs_client, board_processor, websocket_server)
-
-    try:
-        frame_processor.run()
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user, shutting down...")
-    except Exception as e:
-        logger.error(f"Unexpected error: {e!s}", exc_info=True)
-    finally:
-        logger.info("Exiting capture loop")
-        http_server.stop()
-        websocket_server.stop()
 
 
 @app.command("list-cameras")
@@ -250,7 +229,11 @@ def list_cameras() -> None:
     from floptician.camera_manager import CameraManager
 
     camera_manager = CameraManager()
-    cameras = camera_manager.get_available_cameras()
+    try:
+        cameras = camera_manager.get_available_cameras()
+    except CameraError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
 
     if not cameras:
         console.print("[yellow]No cameras found.[/yellow]")
@@ -261,7 +244,7 @@ def list_cameras() -> None:
     table.add_column("Name", style="green")
 
     for cam in cameras:
-        table.add_row(str(cam["camera_index"]), cam["camera_name"])
+        table.add_row(str(cam.index), cam.name)
 
     console.print(table)
 

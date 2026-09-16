@@ -22,7 +22,7 @@ class MyHandler(BaseHTTPRequestHandler):
                 self.send_header("Expires", "0")
                 self.end_headers()
                 self.wfile.write(html)
-                logger.info(f"Served {self.server.html_file_path}")
+                logger.debug(f"Served {self.server.html_file_path}")
             except Exception as e:
                 logger.error(f"Error serving {self.server.html_file_path}: {e}", exc_info=True)
                 self.send_error(500, "Internal server error")

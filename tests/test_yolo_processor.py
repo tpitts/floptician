@@ -8,6 +8,21 @@ from floptician.models import BoundingBox, CardDetection
 from floptician.yolo_processor import YOLOProcessor
 
 
+def test_native_720p_letterbox_preserves_pixels_without_resampling(monkeypatch):
+    frame = np.random.default_rng(42).integers(0, 256, (720, 1280, 3), dtype=np.uint8)
+    processor = YOLOProcessor.__new__(YOLOProcessor)
+
+    def unexpected_resize(*args, **kwargs):
+        pytest.fail("Native 1280-wide input should only need padding")
+
+    monkeypatch.setattr("floptician.yolo_processor.cv2.resize", unexpected_resize)
+    result = processor.letterbox_image(frame, (1280, 1280))
+    assert result.shape == (1280, 1280, 3)
+    np.testing.assert_array_equal(result[280:1000], frame)
+    assert not result[:280].any()
+    assert not result[1000:].any()
+
+
 def test_inference_exception_is_not_an_empty_detection(normal_frame):
     processor = YOLOProcessor.__new__(YOLOProcessor)
     processor.model_type = "pt"

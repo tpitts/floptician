@@ -114,6 +114,10 @@ def test_malformed_settings_have_clear_errors(tmp_path, content):
         ("capture", "fps", float("nan")),
         ("capture", "width", 0),
         ("capture", "height", True),
+        ("capture", "camera_width", 0),
+        ("capture", "camera_height", True),
+        ("capture", "camera_fps", float("nan")),
+        ("capture", "camera_fps", -1),
         (None, "http_port", 65536),
         (None, "websocket_port", "9001"),
         ("obs", "port", -1),
@@ -128,7 +132,7 @@ def test_malformed_settings_have_clear_errors(tmp_path, content):
 def test_invalid_numeric_settings(app_config, section, name, value):
     target = getattr(app_config, section) if section else app_config
     setattr(target, name, value)
-    with pytest.raises(ConfigurationError, match=name if name != "fps" else "FPS"):
+    with pytest.raises(ConfigurationError, match="FPS" if name in ("fps", "camera_fps") else name):
         validate_config(app_config)
 
 

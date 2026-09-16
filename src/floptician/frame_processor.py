@@ -52,25 +52,27 @@ class FrameProcessor:
         self._last_debug_save_time = 0.0
 
         self.previous_frame = None
+        self.fd = None
 
         if config.platform == "Windows":
             import msvcrt
 
             self.kbhit = msvcrt.kbhit
             self.getch = msvcrt.getch
-        else:
+        elif sys.stdin.isatty():
             logger.debug("Loading Unix-specific input handling modules...")
             import termios
 
             self.fd = sys.stdin.fileno()
             self.old_settings = termios.tcgetattr(self.fd)
+            self.old_flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
             self.setup_unix_input()
 
     def setup_unix_input(self):
         new_settings = termios.tcgetattr(self.fd)
         new_settings[3] = new_settings[3] & ~termios.ICANON & ~termios.ECHO
         termios.tcsetattr(self.fd, termios.TCSANOW, new_settings)
-        fcntl.fcntl(self.fd, fcntl.F_SETFL, fcntl.fcntl(self.fd, fcntl.F_GETFL) | os.O_NONBLOCK)
+        fcntl.fcntl(self.fd, fcntl.F_SETFL, self.old_flags | os.O_NONBLOCK)
 
     def capture_frame(self) -> FrameInfo | None:
         try:
@@ -180,7 +182,7 @@ class FrameProcessor:
             if self.kbhit() and self.getch() == b"q":
                 logger.info("Quit command received. Shutting down...")
                 return True
-        else:
+        elif self.fd is not None:
             try:
                 c = sys.stdin.read(1)
                 if c == "q":
@@ -223,13 +225,13 @@ class FrameProcessor:
     def shutdown(self):
         logger.info("Initiating shutdown...")
         self.running = False
-        if self.config.capture.mode == CaptureMode.OBS_WEBSOCKET:
-            self.obs_client.disconnect()
-        elif hasattr(self.config.capture, "camera_manager"):
-            self.config.capture.camera_manager.release_camera()
-
-        if self.config.platform != "Windows":
-            termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.old_settings)
+        # Camera, OBS and servers are borrowed; the CLI owns their lifetime.
+        if self.fd is not None:
+            try:
+                termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.old_settings)
+            finally:
+                fcntl.fcntl(self.fd, fcntl.F_SETFL, self.old_flags)
+                self.fd = None
 
         end_time = time.time()
         total_run_time = end_time - self.start_time
@@ -237,6 +239,8 @@ class FrameProcessor:
         logger.info(f"Total frames processed: {self.frame_count}")
         if self.frame_count > 0:
             avg_processing_time = self.total_processing_time / self.frame_count
-            logger.info(f"Average processing time: {avg_processing_time:.4f}s")
-            logger.info(f"Effective FPS: {self.frame_count / total_run_time:.2f}")
+            logger.info(
+                "Average detection + board processing: %.1f ms (excludes capture/rendering)", avg_processing_time * 1000
+            )
+            logger.info(f"Processed frames/second: {self.frame_count / total_run_time:.2f}")
         logger.info("Shutdown complete")

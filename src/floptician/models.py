@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from floptician.protocols import CameraProtocol
 
 DEFAULT_YOLO_MODEL = "models/yolov8l-2026-08-29.pt"
 DEFAULT_YOLO_IMAGE_SIZE = 1280
@@ -55,10 +59,13 @@ class CaptureConfig:
     width: int = 640
     height: int = 360
     fps: float = 1.8
+    camera_width: int = 1280
+    camera_height: int = 720
+    camera_fps: float = 30
     swap_channels: bool = False
     # Runtime state (set after init, not from config file)
     selected_webcam: str | None = None
-    camera_manager: object | None = None
+    camera_manager: CameraProtocol | None = None
 
 
 @dataclass

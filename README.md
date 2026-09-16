@@ -56,11 +56,38 @@ uv sync --locked --no-dev
 ```
 
 - Windows development syncs use `--extra windows` plus either `--extra cpu` or `--extra cuda`.
-- On macOS, the current camera path uses FFmpeg via `imageio-ffmpeg`; PyObjC is not required.
+- Camera capture uses OpenCV: AVFoundation on macOS and DirectShow on Windows.
+  Device discovery uses persistent IDs and the same ordering as the selected backend.
+  macOS discovery dependencies (PyObjC) are installed automatically by uv.
 - On Apple Silicon, add `--extra coreml`, run `scripts/convert.py`, then run
   `scripts/verify_coreml.py` before selecting the generated `.mlpackage` in `config.yaml`.
   The default `cpu-and-ne` Core ML policy leaves the GPU available to OBS.
-- Mac migration is prepared but still needs validation on hardware; retain the working environment until then.
+
+Camera capture
+--------------
+
+Use `floptician list-cameras` to inspect connected devices. The interactive run
+command offers an arrow-key camera menu. Device identity is resolved again before
+opening, so a changed camera index cannot silently select a different device.
+
+`capture.camera_width`, `camera_height`, and `camera_fps` request the native camera
+mode (defaults: 1280×720 at 30 fps). Direct capture preserves native resolution;
+`capture.width` and `height` apply only to OBS screenshots. `capture.fps` controls
+detection sampling (default 1.8).
+Delivered dimensions and the driver's reported FPS are logged; unsupported modes
+produce a warning. The detector prepares its input once, preserving aspect ratio
+with black padding when necessary; there is no intermediate downsize/upscale.
+Capture reads on demand without an application frame queue.
+
+The CLI owns camera, server, and OBS lifetimes and releases them on cancellation,
+startup failure, or disconnection. A failed camera read stops the run with an error;
+reconnect the camera and restart rather than silently changing devices. The frame
+processor owns only its keyboard state. `CameraProtocol` keeps processing independent
+of hardware; device discovery and capture construction are injectable for tests.
+
+The end-to-end capture test uses OpenCV image-sequence capture, the actual YOLO model,
+board stabilization, HTTP/WebSocket servers, and a Chrome-rendered overlay. Hardware
+and OBS coexistence still need verification on each target machine, especially Windows.
 
 Repo Layout
 -----------

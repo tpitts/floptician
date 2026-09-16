@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from types import SimpleNamespace
 
@@ -11,6 +12,31 @@ from floptician.frame_processor import FrameProcessor
 from floptician.models import FrameInfo
 from tests.conftest import FakeCamera
 from tests.test_board_stability import Replay, row, signature
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix terminal settings")
+def test_shutdown_restores_terminal_flags(app_config, fake_obs, fake_ws, monkeypatch):
+    import fcntl
+    import pty
+    import termios
+
+    master, slave = pty.openpty()
+    try:
+        original_settings = termios.tcgetattr(slave)
+        original_flags = fcntl.fcntl(slave, fcntl.F_GETFL)
+        monkeypatch.setattr(sys, "stdin", SimpleNamespace(fileno=lambda: slave, isatty=lambda: True))
+        app_config.platform = "Darwin"
+        camera = FakeCamera()
+        app_config.capture.camera_manager = camera
+        processor = FrameProcessor(app_config, fake_obs, None, fake_ws)
+        assert fcntl.fcntl(slave, fcntl.F_GETFL) & os.O_NONBLOCK
+        processor.shutdown()
+        assert not camera.released  # Resource ownership belongs to the CLI.
+        assert termios.tcgetattr(slave) == original_settings
+        assert fcntl.fcntl(slave, fcntl.F_GETFL) == original_flags
+    finally:
+        os.close(slave)
+        os.close(master)
 
 
 @pytest.fixture
@@ -120,4 +146,4 @@ def test_capture_loop_only_broadcasts_successful_results(pipeline, normal_frame,
     assert [m["frame_id"] for m in messages] == [1, 3]
     assert all(m["configuration"] == original.configuration.name for m in messages)
     assert all(len(m["board"]) == 3 for m in messages)
-    assert processor.config.capture.camera_manager.released
+    assert not processor.config.capture.camera_manager.released

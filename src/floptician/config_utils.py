@@ -87,6 +87,9 @@ def _build_app_config(raw: dict[str, Any], config_path: Path) -> AppConfig:
         width=cap_raw.get("width", 640),
         height=cap_raw.get("height", 360),
         fps=cap_raw.get("fps", 1.8),
+        camera_width=cap_raw.get("camera_width", 1280),
+        camera_height=cap_raw.get("camera_height", 720),
+        camera_fps=cap_raw.get("camera_fps", 30),
         swap_channels=cap_raw.get("swap_channels", False),
     )
 
@@ -153,7 +156,10 @@ def validate_config(config: AppConfig) -> None:
     _check_number("Capture FPS", config.capture.fps, 0)
     if config.capture.fps <= 0:
         raise ConfigurationError(f"Capture FPS must be positive, got {config.capture.fps}")
-    for name in ("width", "height"):
+    _check_number("Camera FPS", config.capture.camera_fps, 0)
+    if config.capture.camera_fps <= 0:
+        raise ConfigurationError("Camera FPS must be positive")
+    for name in ("width", "height", "camera_width", "camera_height"):
         _check_number(f"Capture {name}", getattr(config.capture, name), 1, integer=True)
     for name, port in (
         ("http_port", config.http_port),
