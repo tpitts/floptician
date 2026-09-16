@@ -51,14 +51,9 @@ class CameraManager:
     def get_available_cameras(self) -> list[CameraDevice]:
         return self._discover()
 
-    def open_camera(
-        self, selected: CameraDevice, *, camera_width=1280, camera_height=720, camera_fps=30
-    ) -> None:
+    def open_camera(self, selected: CameraDevice, *, camera_width=1280, camera_height=720, camera_fps=30) -> None:
         self.release_camera()
-        if any(
-            not isinstance(n, int) or isinstance(n, bool) or n <= 0
-            for n in (camera_width, camera_height)
-        ):
+        if any(not isinstance(n, int) or isinstance(n, bool) or n <= 0 for n in (camera_width, camera_height)):
             raise CameraError("Camera dimensions must be positive integers")
         if not math.isfinite(camera_fps) or camera_fps <= 0:
             raise CameraError("Camera FPS must be positive and finite")

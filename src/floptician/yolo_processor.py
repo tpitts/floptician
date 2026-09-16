@@ -225,7 +225,8 @@ class YOLOProcessor:
         new_height = int(height * scale)
 
         resized_image = (
-            image if (new_width, new_height) == (width, height)
+            image
+            if (new_width, new_height) == (width, height)
             else cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
         )
 
