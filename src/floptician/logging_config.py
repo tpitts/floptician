@@ -2,6 +2,17 @@ from __future__ import annotations
 
 import logging
 
+from rich.logging import RichHandler
+from rich.text import Text
+
+
+class BoardLogHandler(RichHandler):
+    def render_message(self, record: logging.LogRecord, message: str) -> Text:
+        board = getattr(record, "board_text", None)
+        if isinstance(board, Text):
+            return board.copy()
+        return super().render_message(record, message)
+
 
 def configure_logging(*, debug: bool = False) -> None:
     logging_level = logging.DEBUG if debug else logging.INFO
@@ -12,27 +23,14 @@ def configure_logging(*, debug: bool = False) -> None:
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
-    try:
-        from rich.logging import RichHandler
-
-        handler = RichHandler(
-            level=logging_level,
-            show_time=True,
-            show_path=debug,
-            markup=False,
-            rich_tracebacks=True,
-        )
-        root_logger.addHandler(handler)
-    except ImportError:
-        handler = logging.StreamHandler()
-        handler.setLevel(logging_level)
-        handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s | %(levelname)s | %(module)s:%(lineno)d | %(message)s",
-                datefmt="%H:%M:%S",
-            )
-        )
-        root_logger.addHandler(handler)
+    handler = BoardLogHandler(
+        level=logging_level,
+        show_time=True,
+        show_path=debug,
+        markup=False,
+        rich_tracebacks=True,
+    )
+    root_logger.addHandler(handler)
 
     # Suppress noisy third-party loggers
     for noisy_logger in ("ultralytics", "obsws_python", "comtypes"):

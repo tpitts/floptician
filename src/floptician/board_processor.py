@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
+from floptician.board_log import format_board
 from floptician.community_card_detector import CommunityCardDetector
 from floptician.models import (
     AppConfig,
@@ -164,7 +165,8 @@ class BoardProcessor:
             ):
                 self._confirmed = observed
                 self.interrupt()
-                logger.info("Confirmed board: %s", observed.key)
+                board_text = format_board(observed.configuration, observed.cards)
+                logger.info("%s", board_text.plain, extra={"board_text": board_text})
                 return
         else:
             self._reset_candidate()
